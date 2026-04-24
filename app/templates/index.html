@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP AI MONITORING - HTMP SYSTEMS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <h1>SOP AI MONITORING</h1>
+        </div>
+        <div style="display: flex; gap: 30px; font-size: 0.8rem; color: #888;">
+            <div>CPU: <span id="cpu-val" style="color:var(--primary)">--</span></div>
+            <div>RAM: <span id="ram-val" style="color:var(--primary)">--</span></div>
+            <div>STORAGE: <span id="disk-val" style="color:var(--primary)">--</span></div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Lưới Camera chính -->
+        <div id="camera-grid" class="camera-grid">
+            <!-- Loading placeholder -->
+            <div style="padding: 50px; text-align: center; color: #555;">Initializing cameras...</div>
+        </div>
+
+        <div class="dashboard-footer">
+            <!-- Thống kê vi phạm -->
+            <div class="widget">
+                <div class="widget-title">Performance Metrics</div>
+                <div style="height: 200px; display: flex; align-items: center; justify-content: center; color: #444;">
+                    Data collection in progress...
+                </div>
+            </div>
+
+            <!-- Nhật ký vi phạm gần đây -->
+            <div class="widget">
+                <div class="widget-title">Recent Event Log</div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table class="event-table">
+                        <thead>
+                            <tr style="text-align: left; font-size: 0.7rem; color: #555; text-transform: uppercase;">
+                                <th style="padding: 10px;">Time</th>
+                                <th>Station</th>
+                                <th>Violation</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="event-list">
+                            <!-- Events go here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script điều khiển -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

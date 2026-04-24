@@ -1,0 +1,54 @@
+server:
+  host: "0.0.0.0"
+  port: 5001
+  debug: false
+  secret_key: "default-secret-key-change-me"
+
+inference:
+  device: "cpu"
+  model_format: "onnx"
+  num_threads: 8          # Giảm từ 4 xuống 2 — YOLO 416×416 không cần nhiều thread, tiết kiệm CPU
+  max_concurrent_inference: 1  # Serialize qua lock, không cần nhiều hơn 1
+
+models:
+  yolo:
+    weights: "models/yolo/best.onnx"
+    input_size: 640
+    fps_cap: 15
+    conf_threshold: 0.25
+    iou_threshold: 0.4516
+  lstm:
+    weights: "models/lstm/step_classifier.pt"
+    label_map: "models/lstm/label_map.json"
+    window_size: 16
+    step_size: 2
+    confidence_threshold: 0.3
+    idle_timeout_frames: 90
+
+cameras:
+  - id: "station_01"
+    name: "Trạm lắp ráp 1"
+    rtsp_url: "video_test2.mp4"
+    #rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
+    sop_file: "config/sop_definitions/station_01.yaml"
+    resolution: [640, 480]
+    fps_cap: 15
+
+alerts:
+  audio:
+    enabled: true
+    sound_file: "sounds/alert.wav"
+    volume: 0.8
+    cooldown_sec: 10
+
+storage:
+  violations_dir: "data/violations/"
+  clip_pre_seconds: 10
+  clip_post_seconds: 20
+  max_disk_usage_percent: 85
+  min_free_gb: 50
+
+logging:
+  level: "INFO"
+  log_file: "data/logs/system.log"
+  max_log_mb: 100

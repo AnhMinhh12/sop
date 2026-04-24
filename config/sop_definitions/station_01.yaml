@@ -1,0 +1,79 @@
+station_id: "01"
+station_name: "Station 01 - Lắp & Check Jig (Reformed)"
+
+# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+zones:
+  middle_table: [[0.466, 0.529], [0.396, 0.472], [0.48, 0.307], [0.55, 0.364]]
+  left_table: [[0.452, 0.232], [0.527, 0.11], [0.649, 0.151], [0.598, 0.3]]
+  mold: [[0.495, 0.571], [0.67, 0.718], [0.749, 0.447], [0.587, 0.351]]
+  button_right: [[0.358, 0.728], [0.398, 0.629], [0.454, 0.699], [0.411, 0.804]]
+  jig_zone: [[0.624, 0.204], [0.567, 0.007], [0.141, 0.232], [0.304, 0.653]]
+
+# QUY TRÌNH SOP CHI TIẾT (10 BƯỚC TỐI ƯU)
+steps:
+  - step_order: 1
+    step_name: "Lấy 2 SP từ khuôn"
+    logic: "interaction"
+    sequence: ["mold"]
+    max_hand_dist: 0.15
+
+  - step_order: 2
+    step_name: "Đặt SP vào bàn bên trái"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "left_table"
+
+  - step_order: 3
+    step_name: "Lấy 2 Slider từ khuôn"
+    logic: "zone_trigger"
+    active_hand: "both"
+    required_zone: "mold"
+
+  - step_order: 4
+    step_name: "Đặt Slider vào bàn giữa"
+    logic: "zone_trigger"
+    active_hand: "both"
+    required_zone: "middle_table"
+
+  - step_order: 5
+    step_name: "Lắp Terminal vào Slider"
+    logic: "stay_in_zone"
+    required_zone: "middle_table"
+    min_duration_sec: 3.0
+    active_hand: "both"
+
+  - step_order: 6
+    step_name: "Đưa 2 Slider vào khuôn"
+    logic: "zone_trigger"
+    active_hand: "both"
+    required_zone: "mold"
+
+  - step_order: 7
+    step_name: "Tay PHẢI bấm nút bên PHẢI"
+    logic: "zone_trigger"
+    required_zone: "button_right"
+    active_hand: "right"
+
+  - step_order: 8
+    step_name: "Lấy Jig & Sản phẩm"
+    logic: "dual_task"
+    left_zone: "left_table"
+    right_zone: "middle_table"
+
+  - step_order: 9
+    step_name: "Check Jig"
+    logic: "interaction"
+    required_zone: "jig_zone"
+    min_duration_sec: 1.5
+    max_hand_dist: 0.15
+
+  - step_order: 10
+    step_name: "Trả Jig & Sản phẩm (về vị trí)"
+    logic: "dual_task_return"
+    left_zone: "left_table"
+    right_zone: "middle_table"
+
+config:
+  violation_tolerance: 3
+  idle_timeout_frames: 120
+  transition_timeout_sec: 7.0

@@ -1,0 +1,282 @@
+:root {
+    --primary: #2d5cf7;
+    --secondary: #6366f1;
+    --bg: #f8fafc;
+    --card-bg: #ffffff;
+    --danger: #ef4444;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --text-main: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg);
+    background-image: radial-gradient(at 0% 0%, rgba(45, 92, 247, 0.03) 0, transparent 50%), 
+                      radial-gradient(at 50% 0%, rgba(99, 102, 241, 0.03) 0, transparent 50%);
+    color: var(--text-main);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+/* Header */
+header {
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 3rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.logo-container h1 {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text-main);
+    letter-spacing: -0.025em;
+}
+
+.logo-container span {
+    color: var(--primary);
+}
+
+/* Main Layout */
+.container {
+    padding: 2rem;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-title span {
+    color: var(--primary);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    background: rgba(45, 92, 247, 0.1);
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+
+/* Grid System */
+.camera-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 2rem;
+    margin-bottom: 3rem;
+}
+
+/* Station Card - NGANG */
+.station-card {
+    background: var(--card-bg);
+    border-radius: 28px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow);
+    display: flex; /* Đổi sang flex để xếp ngang */
+    flex-direction: row;
+    min-height: 400px;
+}
+
+.station-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08);
+}
+
+/* Video Wrapper - CHIẾM 65% BÊN TRÁI */
+.video-wrapper {
+    position: relative;
+    width: 65%;
+    aspect-ratio: 16/9;
+    background-color: #f1f5f9;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+}
+
+.video-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Badge Status */
+.status-badge {
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
+    background: var(--success);
+    color: white;
+    padding: 6px 16px;
+    border-radius: 30px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Info Panel - 35% BÊN PHẢI */
+.info-panel {
+    width: 35%;
+    padding: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: #fafbfc;
+}
+
+.station-name {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+.progress-container {
+    margin-top: 1.5rem;
+}
+
+.progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.progress-bar {
+    height: 10px;
+    background: #f1f5f9;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    width: 0%;
+    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Bottom Stats Widget */
+.dashboard-footer {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+}
+
+.widget {
+    background: #fff;
+    border-radius: 24px;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+.widget-title {
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1.5rem;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 5px;
+    border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* SOP Steps List */
+.sop-steps-list {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border);
+    max-height: 250px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+/* Ẩn scrollbar nhưng vẫn scroll được cho gọn */
+.sop-steps-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sop-step-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sop-step-item.active {
+    color: #111;
+    font-weight: 700;
+    transform: translateX(8px);
+}
+
+.sop-step-item.completed {
+    color: var(--success);
+    opacity: 0.8;
+}
+
+.sop-step-item .tick-box {
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    transition: all 0.3s;
+}
+
+.sop-step-item.completed .tick-box {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+}
+
+.sop-step-item.active .tick-box {
+    border-color: var(--primary);
+    background: rgba(45, 92, 247, 0.1);
+    box-shadow: 0 0 10px rgba(45, 92, 247, 0.2);
+}
