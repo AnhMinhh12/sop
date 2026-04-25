@@ -148,8 +148,9 @@ class FrameProcessor:
             self.current_processed_frame = display_frame
             self._loop_count += 1
             
-            # 6. Socket Update
-            if self._loop_count % 5 == 0:
+            # 6. Socket Update - emit ngay khi cycle completed, khong cho moi 5 frame
+            is_completed = self.latest_status.get("sop_status") == "completed"
+            if is_completed or self._loop_count % 5 == 0:
                 emit_step_update(self.cam_id, self.latest_status, self.latest_status["hands_info"])
 
             elapsed = time.time() - loop_start

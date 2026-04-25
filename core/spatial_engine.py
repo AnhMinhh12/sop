@@ -31,6 +31,7 @@ class SpatialEngine:
         # Trạng thái moteur logic
         self.current_step_idx = 0
         self.step_start_time = 0
+        self._completed_at = 0  # Cooldown timer sau khi hoàn thành cycle
         self.last_hands = []
         self.hand_dist = -1.0
         
@@ -107,7 +108,25 @@ class SpatialEngine:
                 coords += f" {s}({c[0]:.3f},{c[1]:.3f})"
             logger.info(f"DEBUG: Step={self.current_step_idx+1} zone={target} | L_in={l_in} R_in={r_in} | display: L={active_zones['left']} R={active_zones['right']} |{coords}")
 
-        # 2. Kiểm tra logic SOP
+        # 2. Check cooldown sau khi hoàn thành chu kỳ (giữ trạng thái "completed" 3 giây)
+        if self._completed_at > 0:
+            if now - self._completed_at < 3.0:
+                return {
+                    "sop_status": "completed",
+                    "expected_step": "DONE",
+                    "detected_label": "Finished",
+                    "step_index": len(self.sop_steps),
+                    "step_list": [s["step_name"] for s in self.sop_steps],
+                    "progress_percent": 100,
+                    "hands_info": active_zones,
+                    "dist": self.hand_dist
+                }
+            else:
+                # Hết 3 giây → reset cho chu kỳ mới
+                self._completed_at = 0
+                self.reset()
+
+        # 3. Kiểm tra logic SOP
         if self.current_step_idx < len(self.sop_steps):
             step = self.sop_steps[self.current_step_idx]
             if self._check_step_logic(step, now):
@@ -122,19 +141,19 @@ class SpatialEngine:
                 
                 if self.current_step_idx >= len(self.sop_steps):
                     logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
-                    self.reset()
+                    self._completed_at = now  # Bắt đầu cooldown 3 giây
                     return {
                         "sop_status": "completed", 
                         "expected_step": "DONE",
                         "detected_label": "Finished",
-                        "step_index": 10,
+                        "step_index": len(self.sop_steps),
                         "step_list": [s["step_name"] for s in self.sop_steps],
                         "progress_percent": 100,
                         "hands_info": active_zones,
                         "dist": self.hand_dist
                     }
 
-        # 3. Kết quả trả về cho UI
+        # 4. Kết quả trả về cho UI
         cur_step_name = self.sop_steps[self.current_step_idx]["step_name"] if self.current_step_idx < len(self.sop_steps) else "DONE"
         
         # Tạo chuỗi mô tả vùng đang chạm (Để Dashboard hiện AI đang thấy gì)
@@ -221,7 +240,7 @@ class SpatialEngine:
         if not zone_pts:
             return False
         poly = np.array(zone_pts, np.float32)
-        w, h = self.config.get("w", 640), self.config.get("h", 480)
+        w, h = self.config.get("w", 1280), self.config.get("h", 720)
         
         for hand in self.last_hands:
             if hand["label"].lower() != side:
