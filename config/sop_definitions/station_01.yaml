@@ -13,9 +13,9 @@ zones:
 steps:
   - step_order: 1
     step_name: "Lấy 2 SP từ khuôn"
-    logic: "interaction"
-    sequence: ["mold"]
-    max_hand_dist: 0.15
+    logic: "zone_trigger"
+    active_hand: "both"
+    required_zone: "mold"
 
   - step_order: 2
     step_name: "Đặt SP vào bàn bên trái"
@@ -56,22 +56,16 @@ steps:
 
   - step_order: 8
     step_name: "Lấy Jig & Sản phẩm"
-    logic: "dual_task"
-    left_zone: "left_table"
-    right_zone: "middle_table"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "left_table"
 
   - step_order: 9
-    step_name: "Check Jig"
-    logic: "interaction"
+    step_name: "Check Jig & Hoàn thành"
+    logic: "stay_in_zone"
     required_zone: "jig_zone"
-    min_duration_sec: 1.5
-    max_hand_dist: 0.15
-
-  - step_order: 10
-    step_name: "Trả Jig & Sản phẩm (về vị trí)"
-    logic: "dual_task_return"
-    left_zone: "left_table"
-    right_zone: "middle_table"
+    min_duration_sec: 2.0
+    active_hand: "any"
 
 config:
   violation_tolerance: 3

@@ -50,6 +50,17 @@ class RTSPStream:
                     time.sleep(5)
                     continue
 
+            # Flush buffer: Đọc bỏ các khung hình cũ để đảm bảo lấy khung hình MỚI NHẤT
+            # Đối với RTSP, việc này cực kỳ quan trọng để tránh trễ (latency)
+            if self.rtsp_url.startswith(("rtsp://", "http://", "https://")):
+                # Với RTSP thật: grab() nhanh để xả buffer
+                while True:
+                    grabbed = self.cap.grab()
+                    if not grabbed: break
+                    # Chúng ta chỉ muốn khung hình cuối cùng, nên grab() liên tục 
+                    # cho đến khi không còn khung hình nào chờ sẵn
+                    if not self.cap.grab(): break 
+            
             start_time = time.time()
             ret, frame = self.cap.read()
             
@@ -57,10 +68,9 @@ class RTSPStream:
                 with self.lock:
                     self.frame = frame
                 self.status = "connected"
-                # Chỉ log mỗi 300 frame (20s) để tránh làm đầy file log
+                # Chỉ log mỗi 300 frame
                 if getattr(self, '_frame_count', 0) % 300 == 0:
                     print(f"RTSPStream [{self.camera_id}]: Frame received successfully.", flush=True)
-                    logger.debug(f"RTSPStream [{self.camera_id}]: Reading frames active...")
                 self._frame_count = getattr(self, '_frame_count', 0) + 1
             else:
                 # Nếu là file video quay sẵn thì tự động lặp lại (Loop)
@@ -75,11 +85,14 @@ class RTSPStream:
                 self.cap.release()
                 time.sleep(2) # Short wait before reconnecting
 
-            # FPS Control: Đảm bảo không quá giới hạn fps_cap để tiết kiệm CPU
+            # FPS Control: Đảm bảo không quá giới hạn fps_cap
             elapsed = time.time() - start_time
-            sleep_time = max(0, self.frame_delay - elapsed)
+            sleep_time = self.frame_delay - elapsed
+            
             if sleep_time > 0:
                 time.sleep(sleep_time)
+            # Đối với file video (.mp4), KHÔNG nhảy cóc khung hình để tránh mất sự kiện SOP quan trọng
+            # Đối với RTSP thực, logic while grab() ở trên đã xử lý xả buffer rồi.
 
     def _connect(self):
         """Attempts to open the RTSP or Video stream."""

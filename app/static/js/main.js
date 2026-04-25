@@ -87,7 +87,14 @@ socket.on('step_update', (data) => {
     
     if (status) {
         status.innerText = sop_status.toUpperCase();
-        status.style.color = sop_status === 'correct' ? 'var(--success)' : '#888';
+        if (sop_status === 'correct' || sop_status === 'completed') {
+            status.style.color = 'var(--success)';
+            if (sop_status === 'completed') {
+                status.innerHTML = "⭐ CYCLE COMPLETED ⭐";
+            }
+        } else {
+            status.style.color = '#888';
+        }
     }
 
     // UPDATE DANH SÁCH BƯỚC (Cập nhật dấu tích)

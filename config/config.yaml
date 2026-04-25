@@ -28,7 +28,7 @@ models:
 cameras:
   - id: "station_01"
     name: "Trạm lắp ráp 1"
-    rtsp_url: "video_test2.mp4"
+    rtsp_url: "random_23.mp4"
     #rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
     sop_file: "config/sop_definitions/station_01.yaml"
     resolution: [640, 480]
