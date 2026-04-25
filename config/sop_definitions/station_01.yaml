@@ -44,9 +44,10 @@ steps:
 
   - step_order: 6
     step_name: "Đưa 2 Slider vào khuôn"
-    logic: "zone_trigger"
-    active_hand: "both"
+    logic: "multi_trigger"
     required_zone: "mold"
+    required_count: 2
+    active_hand: "both"
 
   - step_order: 7
     step_name: "Tay PHẢI bấm nút bên PHẢI"
@@ -55,10 +56,10 @@ steps:
     active_hand: "right"
 
   - step_order: 8
-    step_name: "Lấy Jig & Sản phẩm"
-    logic: "zone_trigger"
-    active_hand: "any"
-    required_zone: "left_table"
+    step_name: "Lấy Jig (Trái) & SP (Phải)"
+    logic: "dual_task"
+    left_zone: "left_table"
+    right_zone: "middle_table"
 
   - step_order: 9
     step_name: "Check Jig & Hoàn thành"

@@ -30,7 +30,7 @@ class SpatialEngine:
         
         # Trạng thái moteur logic
         self.current_step_idx = 0
-        self.step_start_time = 0
+        self.step_start_time = time.time()
         self._completed_at = 0  # Cooldown timer sau khi hoàn thành cycle
         self.last_hands = []
         self.hand_dist = -1.0
@@ -48,6 +48,10 @@ class SpatialEngine:
         
         # Lịch sử di chuyển (dùng cho interaction logic)
         self.hand_history = {"left": [], "right": []}
+        
+        # Bộ đếm cho logic multi_trigger
+        self.hit_count = 0
+        self.last_trigger_state = False
         
         logger.info(f"SpatialEngine: Initialized with {len(self.sorted_zones)} prioritized zones.")
 
@@ -129,7 +133,9 @@ class SpatialEngine:
         # 3. Kiểm tra logic SOP
         if self.current_step_idx < len(self.sop_steps):
             step = self.sop_steps[self.current_step_idx]
-            if self._check_step_logic(step, now):
+            # Chỉ cho phép hoàn thành nếu bước đã diễn ra ít nhất 0.5 giây (Tránh nhảy bước)
+            elapsed = now - self.step_start_time
+            if elapsed >= 0.5 and self._check_step_logic(step, now):
                 step_num = step.get("step_order", self.current_step_idx + 1)
                 logger.info(f"SpatialEngine: Step {step_num} COMPLETED.")
                 
@@ -138,6 +144,8 @@ class SpatialEngine:
                 # Reset timers cho bước mới
                 self._zone_last_seen = {"left": 0, "right": 0}
                 self._stay_timer = {"left": 0, "right": 0}
+                self.hit_count = 0
+                self.last_trigger_state = False
                 
                 if self.current_step_idx >= len(self.sop_steps):
                     logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
@@ -232,7 +240,32 @@ class SpatialEngine:
                     self._zone_last_seen[side] = now
             return all(now - self._zone_last_seen[s] < grace for s in ["left", "right"])
 
-        return False
+        # === MULTI TRIGGER: Phải chạm vùng N lần (Entry events) ===
+        elif logic == "multi_trigger":
+            target = step.get("required_zone")
+            count_needed = step.get("required_count", 2)
+            mode = step.get("active_hand", "any")
+            
+            # Tính toán trạng thái "chạm" hiện tại (giống zone_trigger)
+            for side in ["left", "right"]:
+                if self._is_in_zone(side, target):
+                    self._zone_last_seen[side] = now
+            
+            current_state = False
+            if mode == "any":
+                current_state = any(now - self._zone_last_seen[s] < 0.2 for s in ["left", "right"])
+            elif mode == "both":
+                current_state = all(now - self._zone_last_seen[s] < 0.2 for s in ["left", "right"])
+            else:
+                current_state = now - self._zone_last_seen[mode] < 0.2
+
+            # Phát hiện sườn lên (Entry Event)
+            if current_state and not self.last_trigger_state:
+                self.hit_count += 1
+                logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed}")
+            
+            self.last_trigger_state = current_state
+            return self.hit_count >= count_needed
 
     def _is_in_zone(self, side: str, zone_name: str) -> bool:
         """Check if hand directly overlaps with zone polygon. Ignores all other zones."""
@@ -246,13 +279,8 @@ class SpatialEngine:
             if hand["label"].lower() != side:
                 continue
             centroid = hand["centroid"]
-            bbox = hand["bbox"]
-            test_points = [
-                centroid,
-                [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h],
-                [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]
-            ]
-            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
+            # CHỈ KIỂM TRA TÂM (CENTROID) ĐỂ TĂNG ĐỘ CHÍNH XÁC, TRÁNH NHẢY BƯỚC DO BBOX QUÁ LỚN
+            if cv2.pointPolygonTest(poly, (centroid[0], centroid[1]), False) >= 0:
                 return True
         return False
 
@@ -283,6 +311,8 @@ class SpatialEngine:
         self.step_start_time = time.time()
         self._zone_last_seen = {"left": 0, "right": 0}
         self._stay_timer = {"left": 0, "right": 0}
+        self.hit_count = 0
+        self.last_trigger_state = False
         for side in ["left", "right"]:
             self.hand_states[side] = {"zone": None, "entry_time": time.time()}
             self.hand_history[side].clear()
