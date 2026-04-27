@@ -29,14 +29,17 @@ class ViolationDetector:
         if violation_type:
             current_time = time.time()
 
-            # Cooldown: không trigger cùng loại vi phạm trong khoảng thời gian ngắn
+            # Cooldown: không trigger cùng loại vi phạm trong cùng 1 bước trong khoảng thời gian ngắn
+            expected_step = sm_status.get("expected_step")
             if (violation_type == self.last_violation_type and
+                    expected_step == getattr(self, 'last_violation_step', None) and
                     current_time - self.last_violation_time < self.cooldown_sec):
                 return None
 
             logger.warning(f"ViolationDetector [{self.camera_id}]: "
                            f"{violation_type} detected (total: {self.violation_count + 1})")
             self.last_violation_type = violation_type
+            self.last_violation_step = expected_step
             self.last_violation_time = current_time
             self.violation_count += 1
 

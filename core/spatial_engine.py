@@ -30,8 +30,10 @@ class SpatialEngine:
         
         # Trạng thái moteur logic
         self.current_step_idx = 0
-        self.step_start_time = time.time()
-        self._completed_at = 0  # Cooldown timer sau khi hoàn thành cycle
+        self.step_start_time = 0.0  # Sẽ được set khi nhận frame đầu tiên
+        self.active_step_time = 0.0
+        self.last_update_time = 0.0
+        self._completed_at = 0
         self.last_hands = []
         self.hand_dist = -1.0
         
@@ -57,24 +59,20 @@ class SpatialEngine:
 
     def update(self, hands_data: List[Dict]) -> Dict[str, Any] | None:
         now = time.time()
-        self.last_hands = hands_data
+        self.last_hands = hands_data  # Cập nhật ngay để các hàm logic dùng đúng frame hiện tại
         
-        # 1. Cập nhật vị trí và lịch sử
+        # 1. Cập nhật vị trí và lịch sử (Cần làm sớm để dùng cho cả error_mode và logic chính)
         active_zones = {"left": None, "right": None}
         for hand in hands_data:
             side = hand["label"].lower()
             if side not in ["left", "right"]: continue
             
-            # Kiểm tra 5 điểm của Box để tăng độ nhạy
             centroid = hand["centroid"]
-            bbox = hand["bbox"] # [x1, y1, x2, y2]
+            bbox = hand["bbox"]
             w, h = self.config.get("w", 1280), self.config.get("h", 720)
             
-            test_points = [
-                centroid,
-                [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h],
-                [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]
-            ]
+            test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
+                           [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
             
             current_zone = None
             for z_info in self.sorted_zones:
@@ -82,7 +80,6 @@ class SpatialEngine:
                 if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
                     current_zone = z_info["name"]
                     break
-            
             active_zones[side] = current_zone
             
             # Ghi nhận thay đổi vùng
@@ -91,26 +88,18 @@ class SpatialEngine:
                 self.hand_states[side]["entry_time"] = now
                 if current_zone:
                     self.hand_history[side].append((current_zone, now))
-                    # Giữ lịch sử ngắn gọn (~1 phút)
                     if len(self.hand_history[side]) > 50: self.hand_history[side].pop(0)
 
-        # Tính khoảng cách
+        # 2. FIX: Tránh tính thời gian chờ load model
+        if self.last_update_time == 0:
+            self.last_update_time = now
+            self.step_start_time = now
+            return {"sop_status": "idle", "expected_step": "Initializing", "step_index": 0, "hands_info": active_zones}
+            
+        dt = now - self.last_update_time
+        self.last_update_time = now
+        
         self.hand_dist = self._get_hand_distance()
-
-        # DEBUG: In ra chi tiet (moi 15 frame ~ 1 giay)
-        self._debug_count = getattr(self, '_debug_count', 0) + 1
-        if self._debug_count % 15 == 0 and self.current_step_idx < len(self.sop_steps):
-            step = self.sop_steps[self.current_step_idx]
-            target = step.get("required_zone", step.get("left_zone", "?"))
-            l_in = self._is_in_zone("left", target)
-            r_in = self._is_in_zone("right", target)
-            # Hien thi toa do tam tay de kiem tra
-            coords = ""
-            for h in self.last_hands:
-                s = h["label"][0].upper()
-                c = h["centroid"]
-                coords += f" {s}({c[0]:.3f},{c[1]:.3f})"
-            logger.info(f"DEBUG: Step={self.current_step_idx+1} zone={target} | L_in={l_in} R_in={r_in} | display: L={active_zones['left']} R={active_zones['right']} |{coords}")
 
         # 2. Check cooldown sau khi hoàn thành chu kỳ (giữ trạng thái "completed" 3 giây)
         if self._completed_at > 0:
@@ -130,55 +119,68 @@ class SpatialEngine:
                 self._completed_at = 0
                 self.reset()
 
-        # 3. Kiểm tra logic SOP
+        # 3. KIỂM TRA LOGIC SOP (CHẾ ĐỘ TỐI GIẢN)
         if self.current_step_idx < len(self.sop_steps):
-            step = self.sop_steps[self.current_step_idx]
-            # Chỉ cho phép hoàn thành nếu bước đã diễn ra ít nhất 0.5 giây (Tránh nhảy bước)
+            current_step = self.sop_steps[self.current_step_idx]
             elapsed = now - self.step_start_time
-            if elapsed >= 0.5 and self._check_step_logic(step, now):
-                step_num = step.get("step_order", self.current_step_idx + 1)
-                logger.info(f"SpatialEngine: Step {step_num} COMPLETED.")
-                
-                self.current_step_idx += 1
-                self.step_start_time = time.time()
-                # Reset timers cho bước mới
-                self._zone_last_seen = {"left": 0, "right": 0}
-                self._stay_timer = {"left": 0, "right": 0}
-                self.hit_count = 0
-                self.last_trigger_state = False
-                
-                if self.current_step_idx >= len(self.sop_steps):
-                    logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
-                    self._completed_at = now  # Bắt đầu cooldown 3 giây
-                    return {
-                        "sop_status": "completed", 
-                        "expected_step": "DONE",
-                        "detected_label": "Finished",
-                        "step_index": len(self.sop_steps),
-                        "step_list": [s["step_name"] for s in self.sop_steps],
-                        "progress_percent": 100,
-                        "hands_info": active_zones,
-                        "dist": self.hand_dist
-                    }
+            
+            # Chỉ chốt bước nếu làm đúng logic và đã đợi ít nhất 0.5 giây
+            if elapsed >= 0.5 and self._check_step_logic(current_step, now):
+                self._complete_current_step(now)
 
-        # 4. Kết quả trả về cho UI
+        return self._get_status_result(active_zones, "processing")
+
+    def _complete_current_step(self, now: float):
+        """Hỗ trợ chốt bước và chuyển trạng thái"""
+        step = self.sop_steps[self.current_step_idx]
+        step_num = step.get("step_order", self.current_step_idx + 1)
+        logger.info(f"SpatialEngine: Step {step_num} COMPLETED.")
+        
+        self.current_step_idx += 1
+        self.step_start_time = now
+        self.active_step_time = 0.0
+        self._zone_last_seen = {"left": 0, "right": 0}
+        self._stay_timer = {"left": 0, "right": 0}
+        self.hit_count = 0
+        self.last_trigger_state = False
+        
+        if self.current_step_idx >= len(self.sop_steps):
+            logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
+            self._completed_at = now
+
+    def _get_status_result(self, active_zones: Dict, status: str) -> Dict:
+        """Helper để đóng gói kết quả UI"""
+        cur_idx = min(self.current_step_idx, len(self.sop_steps) - 1)
         cur_step_name = self.sop_steps[self.current_step_idx]["step_name"] if self.current_step_idx < len(self.sop_steps) else "DONE"
         
-        # Tạo chuỗi mô tả vùng đang chạm (Để Dashboard hiện AI đang thấy gì)
+        # Nếu đã hoàn thành toàn bộ chu kỳ
+        if self.current_step_idx >= len(self.sop_steps):
+            return {
+                "sop_status": "completed", 
+                "expected_step": "DONE",
+                "detected_label": "Finished",
+                "step_index": len(self.sop_steps),
+                "step_list": [s["step_name"] for s in self.sop_steps],
+                "progress_percent": 100,
+                "hands_info": active_zones,
+                "dist": self.hand_dist
+            }
+
         detected_parts = []
         for side, zone in active_zones.items():
             if zone: detected_parts.append(f"{side[0].upper()}:{zone}")
         detected_label = ", ".join(detected_parts) if detected_parts else "Idle"
 
         return {
-            "expected_step": cur_step_name,     # Tên bước để hiện lên UI
-            "detected_label": detected_label,   # Vùng đang chạm để hiện lên UI
+            "expected_step": cur_step_name,
+            "detected_label": detected_label,
             "step_index": self.current_step_idx,
-            "step_list": [s["step_name"] for s in self.sop_steps], # DANH SÁCH TẤT CẢ CÁC BƯỚC
-            "sop_status": "processing",
+            "step_list": [s["step_name"] for s in self.sop_steps],
+            "sop_status": status,
             "hands_info": active_zones,
             "dist": self.hand_dist
         }
+
 
     def _check_step_logic(self, step: Dict, now: float) -> bool:
         logic = step.get("logic")
@@ -187,7 +189,7 @@ class SpatialEngine:
         if logic == "zone_trigger":
             target = step.get("required_zone")
             mode = step.get("active_hand", "any")
-            grace = 0.5  # Cho phép 2 tay lệch nhau tối đa 0.5s
+            grace = 1.5  # Tăng lên 1.5s để dễ nhận diện 2 tay hơn
             
             # Cập nhật timestamp lần cuối mỗi tay chạm vùng mục tiêu
             for side in ["left", "right"]:
@@ -234,7 +236,7 @@ class SpatialEngine:
         elif logic == "dual_task" or logic == "dual_task_return":
             l_zone = step.get("left_zone")
             r_zone = step.get("right_zone")
-            grace = 0.5
+            grace = 1.5
             for side, zone in [("left", l_zone), ("right", r_zone)]:
                 if self._is_in_zone(side, zone):
                     self._zone_last_seen[side] = now
@@ -278,9 +280,18 @@ class SpatialEngine:
         for hand in self.last_hands:
             if hand["label"].lower() != side:
                 continue
+            
             centroid = hand["centroid"]
-            # CHỈ KIỂM TRA TÂM (CENTROID) ĐỂ TĂNG ĐỘ CHÍNH XÁC, TRÁNH NHẢY BƯỚC DO BBOX QUÁ LỚN
-            if cv2.pointPolygonTest(poly, (centroid[0], centroid[1]), False) >= 0:
+            bbox = hand["bbox"]  # [x1, y1, x2, y2]
+            
+            # Kiểm tra 5 điểm (Tâm + 4 góc) để tăng độ nhạy tối đa
+            test_points = [
+                centroid,
+                [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h],
+                [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]
+            ]
+            
+            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
                 return True
         return False
 
@@ -309,6 +320,8 @@ class SpatialEngine:
     def reset(self):
         self.current_step_idx = 0
         self.step_start_time = time.time()
+        self.active_step_time = 0.0
+        self.last_update_time = time.time()
         self._zone_last_seen = {"left": 0, "right": 0}
         self._stay_timer = {"left": 0, "right": 0}
         self.hit_count = 0
