@@ -140,7 +140,7 @@ class FrameProcessor:
             Annotator.draw_zones(display_frame, self.spatial_engine.zones)
             for h in self._cached_hands:
                 bbox = h["bbox"]
-                color = (255, 120, 0) if h["label"] == "left" else (0, 230, 20)
+                color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
                 cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
                 cv2.putText(display_frame, h["label"].upper(), (int(bbox[0]), int(bbox[1])-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)

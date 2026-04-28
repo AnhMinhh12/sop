@@ -59,6 +59,10 @@ function renderCameraGrid(cameras) {
                         <div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div>
                     </div>
 
+                    <div id="status-msg-${cam.id}" style="margin-top: 15px; padding: 10px; background: #f0f7ff; color: #0056b3; border-radius: 6px; font-weight: 600; text-align: center; border: 1px solid #cce5ff;">
+                        Sẵn sàng
+                    </div>
+
                     <!-- DANH SÁCH CÁC BƯỚC SOP -->
                     <div id="step-list-${cam.id}" class="sop-steps-list">
                         <!-- Sẽ được fill bằng JS -->
@@ -72,7 +76,7 @@ function renderCameraGrid(cameras) {
 
 // Real-time Updates via SocketIO
 socket.on('step_update', (data) => {
-    const { camera_id, current_step, detected_step, sop_status, progress_percent, hands_detected, step_index, step_list } = data;
+    const { camera_id, current_step, detected_step, status_msg, hit_count, sop_status, progress_percent, hands_detected, step_index, step_list } = data;
     
     // Update Progress
     const fill = document.getElementById(`progress-${camera_id}`);
@@ -84,6 +88,13 @@ socket.on('step_update', (data) => {
     if (fill) fill.style.width = `${progress_percent}%`;
     if (detectedEle) detectedEle.innerText = detected_step || "Idle";
     if (stepLabel) stepLabel.innerText = current_step;
+    
+    const msgEle = document.getElementById(`status-msg-${camera_id}`);
+    if (msgEle) {
+        msgEle.innerText = status_msg || (sop_status === 'violation' ? "CÓ LỖI - VỀ BƯỚC 1" : "Đang xử lý...");
+        if (sop_status === 'violation') msgEle.style.background = '#fff0f0', msgEle.style.color = '#d32f2f', msgEle.style.borderColor = '#ffcdd2';
+        else msgEle.style.background = '#f0f7ff', msgEle.style.color = '#0056b3', msgEle.style.borderColor = '#cce5ff';
+    }
     
     if (status) {
         status.innerText = sop_status.toUpperCase();

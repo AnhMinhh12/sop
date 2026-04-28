@@ -4,6 +4,14 @@ import signal
 import sys
 import cv2
 
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        # Fallback for Python versions < 3.7
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 # --- TỐI ƯU HÓA TÀI NGUYÊN ---
 # Giới hạn OpenCV threads để không chiếm hết CPU cores
 cv2.setNumThreads(0)
@@ -28,13 +36,14 @@ os.makedirs("data/logs", exist_ok=True)
 os.makedirs("data/violations", exist_ok=True)
 
 # Cấu hình log chuyên nghiệp
+# Đảm bảo StreamHandler sử dụng sys.stdout đã được reconfigure
+console_handler = logging.StreamHandler(sys.stdout)
+file_handler = logging.FileHandler("data/logs/system.log", encoding='utf-8')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[
-        logging.FileHandler("data/logs/system.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[file_handler, console_handler]
 )
 logger = logging.getLogger("Main")
 

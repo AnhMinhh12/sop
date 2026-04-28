@@ -22,6 +22,8 @@ def emit_step_update(camera_id, status_data, hands_detected):
         'camera_id': camera_id,
         'current_step': status_data.get('expected_step', 'Ready'),
         'detected_step': status_data.get('detected_label', 'Idle'),
+        'status_msg': status_data.get('status_msg', ''),
+        'hit_count': status_data.get('hit_count', 0),
         'step_index': status_data.get('step_index', 0),
         'step_list': status_data.get('step_list', []), # Danh sách các bước
         'confidence': status_data.get('confidence', 0),
