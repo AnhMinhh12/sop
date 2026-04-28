@@ -58,6 +58,22 @@
         </div>
     </div>
 
+    <!-- Container cho thông báo nổi -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Modal xem lại video -->
+    <div id="video-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Replay Violation</h3>
+                <div class="modal-close" onclick="closeModal()">×</div>
+            </div>
+            <video id="replay-video" controls autoplay>
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
     <!-- Script điều khiển -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

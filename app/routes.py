@@ -50,3 +50,28 @@ def get_events():
 def get_health():
     stats = DiskMonitor.get_system_stats()
     return jsonify(stats)
+
+@app.route('/clip/<int:event_id>')
+def get_clip_by_id(event_id):
+    """Lấy đường dẫn clip từ DB và serve file."""
+    conn = db.get_connection()
+    conn.row_factory = Database.dict_factory
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT clip_path FROM events WHERE id = ?", (event_id,))
+        event = cursor.fetchone()
+        if event and event['clip_path'] and os.path.exists(event['clip_path']):
+            filename = os.path.basename(event['clip_path'])
+            return send_from_directory(os.path.abspath("data/violations"), filename)
+        return "Clip not found", 404
+    finally:
+        conn.close()
+
+@app.route('/data/violations/<path:filename>')
+def serve_violation_file(filename):
+    """Serve trực tiếp file từ thư mục violations."""
+    return send_from_directory(os.path.abspath("data/violations"), filename)
+
+import os
+from flask import send_from_directory
+from db.db import db, Database

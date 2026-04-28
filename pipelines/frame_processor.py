@@ -54,7 +54,7 @@ class FrameProcessor:
         self.spatial_engine = spatial_engine
         self.violation_detector = violation_detector
         
-        self.ring_buffer = FrameRingBuffer(self.fps, 10)
+        self.ring_buffer = FrameRingBuffer(self.fps, 20)  # Tăng lên 20s để chứa 10s trước và 10s sau
         self.audio_alert = audio_alert
         self.clip_saver = clip_saver
 
@@ -134,7 +134,7 @@ class FrameProcessor:
             # 4. Check Violation
             violation = self.violation_detector.analyze(self.latest_status)
             if violation:
-                self._handle_violation(violation, frame)
+                self._handle_violation(violation)
 
             # 5. Annotation (Vẽ Box thay vì Xương)
             Annotator.draw_zones(display_frame, self.spatial_engine.zones)
@@ -156,17 +156,39 @@ class FrameProcessor:
             elapsed = time.time() - loop_start
             time.sleep(max(0, self.frame_delay - elapsed))
 
-    def _handle_violation(self, violation: Dict, frame: np.ndarray):
-        pre_frames = self.ring_buffer.get_all()
+    def _handle_violation(self, violation: Dict):
+        """Xử lý vi phạm: Đợi 10s để lấy đủ post-event frames rồi mới lưu."""
         def background_task():
-            EventQueries.log_event(self.cam_id, violation.get("violation_type", "unknown"),
-                                   violation.get("detected_label", "N/A"), violation.get("expected_step"),
-                                   "violation", 1.0, "")
-            self.clip_saver.save_violation_clip(self.cam_id, pre_frames)
+            # 1. Phát âm thanh cảnh báo ngay lập tức
             if self.audio_alert: self.audio_alert.trigger()
+            
+            # 2. Emit SocketIO ngay để dashboard hiển thị đỏ rực và thông báo
             from app import emit_violation
             emit_violation(self.cam_id, violation)
+            
+            # 3. Đợi 10 giây để thu thập phần 'sau lỗi' vào ring buffer
+            logger.info(f"FrameProcessor [{self.cam_id}]: Violation detected. Waiting 10s for post-event frames...")
+            time.sleep(10)
+            
+            # 4. Lấy toàn bộ frames (Lúc này buffer chứa 10s trước + 10s sau)
+            frames_to_save = self.ring_buffer.get_all()
+            
+            # 5. Lưu clip
+            clip_path = self.clip_saver.save_violation_clip(self.cam_id, frames_to_save)
+            
+            # 6. Ghi log vào DB với đường dẫn clip chính xác
+            EventQueries.log_event(
+                camera_id=self.cam_id, 
+                violation_type=violation.get("violation_type", "unknown"),
+                step_detected=violation.get("detected_step", "N/A"), 
+                expected_step=violation.get("expected_step"),
+                sop_status="violation", 
+                confidence=violation.get("confidence", 1.0), 
+                clip_path=clip_path
+            )
+            
         threading.Thread(target=background_task, daemon=True).start()
+
 
     def get_latest_frame(self): return self.current_processed_frame
     def stop(self):

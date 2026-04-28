@@ -156,23 +156,54 @@ socket.on('step_update', (data) => {
 });
 
 socket.on('violation', (data) => {
-    const { camera_id, violation_type, timestamp } = data;
+    const { camera_id, violation_type, expected_step, detected_step, timestamp } = data;
     const card = document.getElementById(`station-${camera_id}`);
     const status = document.getElementById(`status-${camera_id}`);
 
     if (card) {
         card.classList.add('violation-active');
-        // Shake animation could be added here
+        // Xóa hiệu ứng rung sau 1s
+        setTimeout(() => card.classList.remove('violation-active'), 1000);
     }
     
     if (status) {
-        status.innerText = `VIOLATION: ${violation_type}`;
+        status.innerText = `LỖI: ${violation_type}`;
         status.style.color = 'var(--danger)';
     }
+
+    // Hiển thị thông báo nổi (Toast)
+    showToast({
+        title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
+        body: `Phát hiện lỗi: ${violation_type}`,
+        details: `Cần thực hiện: "${expected_step}"<br>Nhưng thấy: "${detected_step}"`,
+        time: new Date().toLocaleTimeString()
+    });
 
     // Refresh list
     loadRecentEvents();
 });
+
+function showToast({ title, body, details, time }) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `
+        <div class="toast-header">
+            <div class="toast-title">⚠️ ${title}</div>
+            <div class="toast-time">${time}</div>
+        </div>
+        <div class="toast-body">${body}</div>
+        <div class="toast-details">${details}</div>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Tự động xóa sau 8 giây
+    setTimeout(() => {
+        toast.classList.add('removing');
+        setTimeout(() => toast.remove(), 500);
+    }, 8000);
+}
 
 async function loadRecentEvents() {
     try {
@@ -189,7 +220,10 @@ async function loadRecentEvents() {
                 <td class="event-cell" style="color:#aaa">${ev.camera_id}</td>
                 <td class="event-cell event-type">${ev.violation_type}</td>
                 <td class="event-cell">
-                    <a href="/clip/${ev.id}" target="_blank" style="color:var(--primary); text-decoration:none; font-size:0.75rem">▶ REPLAY</a>
+                    <button onclick="openVideo(${ev.id}, '${ev.camera_id}', '${ev.violation_type}')" 
+                            style="background:none; border:none; color:var(--primary); cursor:pointer; font-weight:700; font-size:0.75rem">
+                        ▶ XEM LẠI
+                    </button>
                 </td>
             `;
             list.appendChild(row);
@@ -198,6 +232,31 @@ async function loadRecentEvents() {
         console.error("Error loading events:", err);
     }
 }
+
+function openVideo(eventId, camId, type) {
+    const modal = document.getElementById('video-modal');
+    const video = document.getElementById('replay-video');
+    const title = document.getElementById('modal-title');
+    
+    title.innerText = `REPLAY: ${camId.toUpperCase()} - ${type}`;
+    video.src = `/clip/${eventId}`;
+    modal.style.display = 'flex';
+    video.play();
+}
+
+function closeModal() {
+    const modal = document.getElementById('video-modal');
+    const video = document.getElementById('replay-video');
+    video.pause();
+    video.src = "";
+    modal.style.display = 'none';
+}
+
+// Close modal when clicking outside
+window.onclick = (event) => {
+    const modal = document.getElementById('video-modal');
+    if (event.target == modal) closeModal();
+};
 
 async function updateSystemHealth() {
     try {
