@@ -60,7 +60,7 @@ class SpatialEngine:
         
         # Bộ đếm cho logic multi_trigger
         self.hit_count = 0
-        self.last_trigger_state = False
+        self.last_trigger_states = {"left": False, "right": False} # Track per-hand for multi_trigger
         
         # New: Stability Counters
         self.skip_frames_counter = 0
@@ -112,9 +112,9 @@ class SpatialEngine:
         
         self.hand_dist = self._get_hand_distance()
 
-        # 2. Check cooldown sau khi hoàn thành chu kỳ (giữ trạng thái "completed" 3 giây)
+        # 2. Check cooldown sau khi hoàn thành chu kỳ (giữ trạng thái "completed" 1 giây)
         if self._completed_at > 0:
-            if now - self._completed_at < 3.0:
+            if now - self._completed_at < 1.0:
                 return {
                     "sop_status": "completed",
                     "expected_step": "DONE",
@@ -153,6 +153,16 @@ class SpatialEngine:
             current_step = self.sop_steps[self.current_step_idx]
             elapsed = now - self.step_start_time
             
+            # --- TÍNH NĂNG MỚI: Kiểm tra quá thời gian chờ (Transition Timeout) ---
+            # Ưu tiên cấu hình trong YAML nhưng không thấp hơn 10.0s (theo yêu cầu mới)
+            timeout_limit = max(10.0, self.config.get("transition_timeout_sec", 10.0))
+            if elapsed > timeout_limit:
+                logger.warning(f"!!! [TIMEOUT] Step {self.current_step_idx+1} timed out after {elapsed:.1f}s")
+                self.is_failed = True
+                self.violation_type = "timeout"
+                self.failed_step_idx = self.current_step_idx
+                return self._get_status_result(active_zones, "violation", violation_type="timeout")
+            
             # --- ƯU TIÊN 1: Kiểm tra bước hiện tại ---
             # Lấy tất cả vùng liên quan đến bước hiện tại
             current_zones = self._get_all_zones_for_step(current_step)
@@ -168,6 +178,20 @@ class SpatialEngine:
                 return self._get_status_result(active_zones, "processing")
             else:
                 self.status_msg = f"Đang chờ: {current_step['step_name']}"
+                
+                # --- PHÁT HIỆN RESTART CHU KỲ SỚM (Khi đang không ở vùng đúng và đã qua nửa SOP) ---
+                if self.current_step_idx > (len(self.sop_steps) // 2):
+                    step_1 = self.sop_steps[0]
+                    # Chỉ check nếu vùng Step 1 khác vùng hiện tại (hoặc nếu tay thực sự ở vùng Step 1 mà không phải vùng hiện tại)
+                    if step_1.get("required_zone") not in current_zones:
+                        # CHẶN LỖI OAN: Không báo restart nếu đây là vùng vừa làm xong (đang rút tay ra)
+                        if step_1.get("required_zone") == self.last_completed_zone and (now - self.last_completed_time < 2.5):
+                             pass
+                        elif self._check_step_logic(step_1, now, update_status=False, centroid_only=True):
+                            logger.warning(f"!!! [PREMATURE RESTART] Cycle restarted at Step 1 while current at Step {self.current_step_idx+1}")
+                            self.is_failed = True
+                            self.failed_step_idx = self.current_step_idx
+                            return self._get_status_result(active_zones, "violation", violation_type="premature_restart")
 
             # --- ƯU TIÊN 2: Chỉ khi THỰC SỰ KHÔNG ở vùng đúng, mới check xem có Skip không ---
             
@@ -239,8 +263,12 @@ class SpatialEngine:
         self.step_start_time = now
         self.active_step_time = 0.0
         self.hit_count = 0  # Reset cho bước mới
-        self.last_trigger_state = False
+        self.last_trigger_states = {"left": False, "right": False}
         self.status_msg = f"Đã xong bước {step_num}"
+        
+        # New: Reset các bộ đếm thời gian để bước tiếp theo không bị "kế thừa" thời gian từ bước cũ
+        self._stay_timer = {}
+        self._zone_last_seen = {}
         
         if self.current_step_idx >= len(self.sop_steps):
             logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
@@ -284,10 +312,12 @@ class SpatialEngine:
 
         # Nếu đang ở trạng thái lỗi
         if self.is_failed:
+            # Ghi lại loại lỗi nếu mới được truyền vào
+            if violation_type: self.violation_type = violation_type
             base_res.update({
                 "detected_label": "VIOLATION - RESTART AT STEP 1",
                 "sop_status": "violation",
-                "violation_type": violation_type or "skip_step"
+                "violation_type": self.violation_type or "skip_step"
             })
             return base_res
 
@@ -340,10 +370,12 @@ class SpatialEngine:
             
             for side in ["left", "right"]:
                 if self._is_in_zone(side, target, centroid_only=centroid_only):
-                    if self._stay_timer[target][side] == 0:
+                    # CHỈ cập nhật timer nếu là bước hiện tại (tránh "đếm lén" khi check skip)
+                    if self._stay_timer[target][side] == 0 and update_status:
                         self._stay_timer[target][side] = now  
                 else:
-                    self._stay_timer[target][side] = 0 
+                    if update_status: # Chỉ reset nếu là bước hiện tại
+                        self._stay_timer[target][side] = 0 
             
             if mode == "any":
                 return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
@@ -385,37 +417,55 @@ class SpatialEngine:
         # === MULTI TRIGGER: Phải chạm vùng N lần (Entry events) ===
         elif logic == "multi_trigger":
             target = step.get("required_zone")
-            count_needed = step.get("required_count", 2)
-            mode = step.get("active_hand", "any")
+            count_needed = step.get("count") or step.get("required_count", 1)
+            mode = step.get("active_hand", "any") # 'left', 'right', 'any', or 'both'
             
-            if target not in self._zone_last_seen:
-                self._zone_last_seen[target] = {"left": 0, "right": 0}
-
-            # Tính toán trạng thái "chạm" hiện tại (giống zone_trigger)
-            for side in ["left", "right"]:
-                if self._is_in_zone(side, target):
-                    self._zone_last_seen[target][side] = now
-            
+            # Tính toán trạng thái "đang đạt yêu cầu" hiện tại
             current_state = False
             if mode == "any":
-                current_state = any(now - self._zone_last_seen[target][s] < 0.2 for s in ["left", "right"])
-            elif mode == "both":
-                current_state = all(now - self._zone_last_seen[target][s] < 0.2 for s in ["left", "right"])
-            else:
-                current_state = now - self._zone_last_seen[target][mode] < 0.2
-
-            # Phát hiện sườn lên (Entry Event)
-            if current_state and not self.last_trigger_state:
-                self.hit_count += 1
-                logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed}")
-                if update_status: self.status_msg = f"Đã nhận {self.hit_count}/{count_needed} lần dập"
+                # 'any' đếm độc lập từng tay (dùng cho các bước dập nhanh từng tay)
+                for side in ["left", "right"]:
+                    is_in = self._is_in_zone(side, target, centroid_only=centroid_only)
+                    if is_in and not self.last_trigger_states.get(side, False):
+                        self.hit_count += 1
+                        logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Hand: {side})")
+                    self.last_trigger_states[side] = is_in
+                current_state = self.hit_count >= count_needed
             
-            if update_status and self.hit_count > 0 and self.hit_count < count_needed:
-                if not current_state:
-                    self.status_msg = f"Đã dập {self.hit_count} lần. Mời dập tiếp!"
+            elif mode == "both":
+                # 'both' yêu cầu cả 2 tay cùng đồng thời mới tính là 1 lần dập
+                is_left = self._is_in_zone("left", target, centroid_only=centroid_only)
+                is_right = self._is_in_zone("right", target, centroid_only=centroid_only)
+                combined_in = is_left and is_right
+                
+                # Chỉ đếm khi trạng thái chuyển từ (không đủ 2 tay) sang (đủ 2 tay)
+                # Dùng key 'both' giả lập trong last_trigger_states
+                if combined_in and not self.last_trigger_states.get("both", False):
+                    self.hit_count += 1
+                    logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Both hands)")
+                
+                self.last_trigger_states["both"] = combined_in
+                current_state = self.hit_count >= count_needed
+            
+            else:
+                # Chế độ 1 tay duy nhất (left hoặc right)
+                is_in = self._is_in_zone(mode, target, centroid_only=centroid_only)
+                if is_in and not self.last_trigger_states.get(mode, False):
+                    self.hit_count += 1
+                    logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Hand: {mode})")
+                self.last_trigger_states[mode] = is_in
+                current_state = self.hit_count >= count_needed
 
-            self.last_trigger_state = current_state
-            return self.hit_count >= count_needed
+            if update_status:
+                if self.hit_count < count_needed:
+                    if self.hit_count == 0:
+                        self.status_msg = f"Đang chờ: {step['step_name']}"
+                    else:
+                        self.status_msg = f"Đã nhận {self.hit_count}/{count_needed} lần dập"
+                else:
+                    self.status_msg = f"Đã xong {count_needed}/{count_needed} lần"
+
+            return current_state
 
     def _is_in_zone(self, side: str, zone_name: str, centroid_only: bool = False) -> bool:
         """Check if hand overlaps with zone. centroid_only=True used for stability."""
@@ -479,6 +529,7 @@ class SpatialEngine:
         self.last_trigger_state = False
         self.is_failed = False
         self.failed_step_idx = -1
+        self.violation_type = None
         self.last_completed_zone = None
         self.last_completed_time = 0.0
         self.skip_frames_counter = 0
