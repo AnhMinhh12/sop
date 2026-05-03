@@ -46,8 +46,9 @@ steps:
     step_name: "Đưa 2 Slider vào khuôn"
     logic: "multi_trigger"
     required_zone: "mold"
-    required_count: 2
-    active_hand: "both"
+    required_count: 4
+    active_hand: "any"
+    timeout_sec: 25.0
 
   - step_order: 7
     step_name: "Tay PHẢI bấm nút bên PHẢI"
@@ -67,6 +68,7 @@ steps:
     required_zone: "jig_zone"
     min_duration_sec: 2.0
     active_hand: "any"
+    timeout_sec: 10.0
 
 config:
   violation_tolerance: 3

@@ -142,7 +142,9 @@ class FrameProcessor:
                 bbox = h["bbox"]
                 color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
                 cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
-                cv2.putText(display_frame, h["label"].upper(), (int(bbox[0]), int(bbox[1])-10), 
+                # Hiển thị nhãn tay + Tên vùng đang đứng (Để debug trực quan)
+                zone_name = self.latest_status.get("hands_info", {}).get(h["label"], "N/A")
+                cv2.putText(display_frame, f"{h['label'].upper()} ({zone_name})", (int(bbox[0]), int(bbox[1])-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
             self.current_processed_frame = display_frame
