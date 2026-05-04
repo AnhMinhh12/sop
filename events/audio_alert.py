@@ -50,8 +50,17 @@ class AudioAlert:
 
     def _play(self):
         try:
-            sd.play(self.data, self.fs)
-            sd.wait() # Chờ phát xong
-            logger.info("AudioAlert: Alert sound played.")
+            # Chỉ phát tối đa 2 giây âm thanh đầu tiên
+            duration_to_play = 2.0
+            samples_to_play = int(duration_to_play * self.fs)
+            
+            if len(self.data) > samples_to_play:
+                play_data = self.data[:samples_to_play]
+            else:
+                play_data = self.data
+
+            sd.play(play_data, self.fs)
+            sd.wait() # Chờ phát xong (tối đa 2s)
+            logger.info("AudioAlert: Alert sound played (2s limit).")
         except Exception as e:
             logger.error(f"AudioAlert: Error playing sound: {e}")

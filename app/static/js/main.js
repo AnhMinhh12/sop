@@ -134,7 +134,11 @@ socket.on('step_update', (data) => {
                 item.classList.add('active');
                 tickBox.innerHTML = idx + 1;
                 // Tự động cuộn đến bước đang làm nếu danh sách dài
-                if (idx > 3) item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                if (idx > 2) {
+                    const scrollContainer = listContainer;
+                    const itemOffset = item.offsetTop - scrollContainer.offsetTop;
+                    scrollContainer.scrollTo({ top: itemOffset - 50, behavior: 'smooth' });
+                }
             } else {
                 tickBox.innerHTML = idx + 1;
             }
@@ -160,23 +164,31 @@ socket.on('violation', (data) => {
     const card = document.getElementById(`station-${camera_id}`);
     const status = document.getElementById(`status-${camera_id}`);
 
+    const typeMap = {
+        'skip_step': 'BỎ BƯỚC',
+        'timeout': 'QUÁ THỜI GIAN',
+        'wrong_step': 'SAI THỨ TỰ',
+        'premature_restart': 'LÀM LẠI SỚM'
+    };
+
+    const vTypeVN = typeMap[violation_type] || violation_type || 'LỖI CHƯA XÁC ĐỊNH';
+
     if (card) {
         card.classList.add('violation-active');
-        // Xóa hiệu ứng rung sau 1s
         setTimeout(() => card.classList.remove('violation-active'), 1000);
     }
     
     if (status) {
-        status.innerText = `LỖI: ${violation_type}`;
+        status.innerText = `LỖI: ${vTypeVN}`;
         status.style.color = 'var(--danger)';
     }
 
     // Hiển thị thông báo nổi (Toast)
     showToast({
         title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
-        body: `Phát hiện lỗi: ${violation_type}`,
-        details: `Cần thực hiện: "${expected_step}"<br>Nhưng thấy: "${detected_step}"`,
-        time: new Date().toLocaleTimeString()
+        body: `Phát hiện lỗi: ${vTypeVN}`,
+        details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
+        time: timestamp || new Date().toLocaleTimeString()
     });
 
     // Refresh list
@@ -213,14 +225,22 @@ async function loadRecentEvents() {
         list.innerHTML = '';
 
         events.forEach(ev => {
+            const typeMap = {
+                'skip_step': 'Bỏ bước',
+                'timeout': 'Quá giờ',
+                'wrong_step': 'Sai bước',
+                'premature_restart': 'Reset sớm'
+            };
+            const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
+
             const row = document.createElement('tr');
             row.className = 'event-row';
             row.innerHTML = `
                 <td class="event-cell">${ev.timestamp.split(' ')[1]}</td>
                 <td class="event-cell" style="color:#aaa">${ev.camera_id}</td>
-                <td class="event-cell event-type">${ev.violation_type}</td>
+                <td class="event-cell event-type">${vTypeVN}</td>
                 <td class="event-cell">
-                    <button onclick="openVideo(${ev.id}, '${ev.camera_id}', '${ev.violation_type}')" 
+                    <button onclick="openVideo(${ev.id}, '${ev.camera_id}', '${vTypeVN}')" 
                             style="background:none; border:none; color:var(--primary); cursor:pointer; font-weight:700; font-size:0.75rem">
                         ▶ XEM LẠI
                     </button>

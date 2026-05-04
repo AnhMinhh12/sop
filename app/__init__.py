@@ -37,5 +37,7 @@ def emit_violation(camera_id, violation_data):
     socketio.emit('violation', {
         'camera_id': camera_id,
         'violation_type': violation_data.get('violation_type'),
+        'expected_step': violation_data.get('expected_step', 'N/A'),
+        'detected_step': violation_data.get('detected_label', 'N/A'), # Sẽ đồng bộ key sang detected_step
         'timestamp': time.strftime('%H:%M:%S')
     })

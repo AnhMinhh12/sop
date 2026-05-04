@@ -128,7 +128,7 @@ class SpatialEngine:
         if self.last_update_time == 0:
             self.last_update_time = now
             self.step_start_time = now
-            return {"sop_status": "idle", "expected_step": "Initializing", "step_index": 0, "hands_info": active_zones}
+            return {"sop_status": "idle", "expected_step": "Đang khởi tạo", "step_index": 0, "hands_info": active_zones}
             
         dt = now - self.last_update_time
         self.last_update_time = now
@@ -140,8 +140,8 @@ class SpatialEngine:
             if now - self._completed_at < 1.0:
                 return {
                     "sop_status": "completed",
-                    "expected_step": "DONE",
-                    "detected_label": "Finished",
+                    "expected_step": "HOÀN THÀNH",
+                    "detected_label": "Xong chu kỳ",
                     "step_index": len(self.sop_steps),
                     "step_list": [s["step_name"] for s in self.sop_steps],
                     "progress_percent": 100,
@@ -323,7 +323,7 @@ class SpatialEngine:
         """Helper để đóng gói kết quả UI kèm logic X-mark và Blank"""
         step_list = [s["step_name"] for s in self.sop_steps]
         
-        cur_step_name = self.sop_steps[self.current_step_idx]["step_name"] if self.current_step_idx < len(self.sop_steps) else "DONE"
+        cur_step_name = self.sop_steps[self.current_step_idx]["step_name"] if self.current_step_idx < len(self.sop_steps) else "HOÀN THÀNH"
         
         detected_parts = []
         for side, zone in active_zones.items():
@@ -349,7 +349,7 @@ class SpatialEngine:
             # Ghi lại loại lỗi nếu mới được truyền vào
             if violation_type: self.violation_type = violation_type
             base_res.update({
-                "detected_label": "VIOLATION - RESTART AT STEP 1",
+                "detected_label": "VI PHẠM - QUAY LẠI BƯỚC 1",
                 "sop_status": "violation",
                 "violation_type": self.violation_type or "skip_step"
             })
@@ -466,13 +466,7 @@ class SpatialEngine:
                 for side in ["left", "right"]:
                     is_in = self._is_in_zone(side, target, centroid_only=centroid_only)
                     
-                    # LOG DEBUG CHI TIẾT ĐỂ BẮT LỖI (Theo yêu cầu)
-                    if self.current_step_idx == 5:
-                        hand_exists = any(h["label"].lower() == side for h in self.last_hands)
-                        if hand_exists:
-                            logger.info(f"  [TRACE] Tay {side}: {'TRONG' if is_in else 'NGOÀI'} vùng {target}")
-                        else:
-                            logger.info(f"  [TRACE] Tay {side}: Không tìm thấy box")
+                    # Đã gỡ bỏ LOG TRACE để terminal sạch sẽ hơn
 
                     if is_in and not self.last_trigger_states.get(side, False):
                         self.hit_count += 1
