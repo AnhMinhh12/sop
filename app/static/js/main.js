@@ -133,11 +133,16 @@ socket.on('step_update', (data) => {
             } else if (idx === step_index) {
                 item.classList.add('active');
                 tickBox.innerHTML = idx + 1;
-                // Tự động cuộn đến bước đang làm nếu danh sách dài
-                if (idx > 2) {
-                    const scrollContainer = listContainer;
-                    const itemOffset = item.offsetTop - scrollContainer.offsetTop;
-                    scrollContainer.scrollTo({ top: itemOffset - 50, behavior: 'smooth' });
+                // Tự động cuộn đến bước đang làm
+                const scrollContainer = listContainer;
+                const itemOffset = item.offsetTop - scrollContainer.offsetTop;
+                
+                if (idx === 0) {
+                    // Nếu là Bước 1 -> Kéo hẳn lên đầu
+                    scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    // Các bước khác -> Cuộn để bước đó nằm ở vị trí dễ nhìn (khoảng giữa khung)
+                    scrollContainer.scrollTo({ top: itemOffset - 60, behavior: 'smooth' });
                 }
             } else {
                 tickBox.innerHTML = idx + 1;
