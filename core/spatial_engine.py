@@ -174,8 +174,6 @@ class SpatialEngine:
         # 3. KIỂM TRA LOGIC SOP CHÍNH
         if self.current_step_idx < len(self.sop_steps):
             current_step = self.sop_steps[self.current_step_idx]
-            elapsed = now - self.step_start_time
-            
             # --- LOGIC CHỜ BẮT ĐẦU CHU KỲ MỚI (KHOẢNG NGHỈ) ---
             current_zones = self._get_all_zones_for_step(current_step)
             is_in_current_area = any(self._is_in_zone("left", z) or self._is_in_zone("right", z) for z in current_zones)
@@ -185,11 +183,15 @@ class SpatialEngine:
                 if is_in_current_area:
                     self.waiting_for_start = False
                     self.step_start_time = now
+                    self.last_completed_time = now  # MỚI: Khóa Skip 1.5s ngay khi vừa chạm tay bắt đầu
                     logger.info("SpatialEngine: New Cycle STARTED (Hand detected in Step 1 zone)")
                 else:
                     # Đang nghỉ: Không bắt lỗi, không báo gì cả
                     self.status_msg = "Sẵn sàng (Đang nghỉ giữa chu kỳ)"
                     return self._get_status_result(active_zones, "idle")
+
+            # Tính thời gian đã trôi qua sau khi đã chốt mốc thời gian bắt đầu
+            elapsed = now - self.step_start_time
 
             # --- TÍNH NĂNG MỚI: Kiểm tra quá thời gian chờ (Transition Timeout) ---
             timeout_limit = current_step.get("timeout_sec", self.config.get("transition_timeout_sec", 15.0))
@@ -203,10 +205,9 @@ class SpatialEngine:
             # --- ƯU TIÊN 1: Kiểm tra bước hiện tại ---
             # Kiểm tra xem có bàn tay nào đang ở trong vùng của bước hiện tại không
             
-            # LUÔN LUÔN gọi bộ đếm logic để AI không bị "mất trí nhớ" về trạng thái tay (In/Out)
-            if elapsed >= 0.8:
-                if self._check_step_logic(current_step, now):
-                    self._complete_current_step(now)
+            # LUÔN LUÔN gọi bộ đếm logic và kiểm tra hoàn thành bước ngay lập tức
+            if self._check_step_logic(current_step, now):
+                self._complete_current_step(now)
 
             if is_in_current_area:
                 self.status_msg = f"Đang thực hiện: {current_step['step_name']}"
@@ -254,8 +255,8 @@ class SpatialEngine:
                     future_step_detected = True
                     self.skip_frames_counter += 1
                     
-                    # Tăng độ trễ cho bắt lỗi Skip (gấp đôi tolerance thông thường)
-                    tolerance = self.config.get("violation_tolerance", 3) * 2
+                    # Tăng độ trễ cho bắt lỗi Skip (gấp 4 lần tolerance để tránh nhạy quá)
+                    tolerance = self.config.get("violation_tolerance", 3) * 4
                     if self.skip_frames_counter >= tolerance:
                         logger.warning(f"!!! [SKIP DETECTED] Step {self.current_step_idx+1} skipped. Direct to Step {i+1}")
                         self.is_failed = True
@@ -368,7 +369,7 @@ class SpatialEngine:
         if logic == "zone_trigger":
             target = step.get("required_zone")
             mode = step.get("active_hand", "any")
-            grace = 1.5
+            grace = 2.0  # Tăng lên 2s để bù đắp thao tác nhanh
             
             if target not in self._zone_last_seen:
                 self._zone_last_seen[target] = {"left": 0, "right": 0}
@@ -577,7 +578,7 @@ class SpatialEngine:
         self.failed_step_idx = -1
         self.violation_type = None
         self.last_completed_zone = None
-        self.last_completed_time = 0.0
+        self.last_completed_time = time.time()  # MỚI: Khóa Skip 1.5s đầu chu kỳ
         self.skip_frames_counter = 0
         self.reset_dwell_start = 0.0
         for side in ["left", "right"]:

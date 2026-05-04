@@ -48,7 +48,7 @@ steps:
     required_zone: "mold"
     required_count: 4
     active_hand: "any"
-    timeout_sec: 25.0
+    timeout_sec: 30.0
 
   - step_order: 7
     step_name: "Tay PHẢI bấm nút bên PHẢI"
@@ -73,4 +73,4 @@ steps:
 config:
   violation_tolerance: 3
   idle_timeout_frames: 120
-  transition_timeout_sec: 5.0
+  transition_timeout_sec: 15.0
