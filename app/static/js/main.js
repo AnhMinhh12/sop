@@ -43,9 +43,12 @@ function renderCameraGrid(cameras) {
                 </div>
             </div>
             <div class="info-panel">
-                <div class="station-meta">
-                    <span class="station-name">${cam.name} (${cam.id})</span>
-                    <div id="status-${cam.id}" class="status-indicator">INITIALIZING</div>
+                <div class="station-meta" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <span class="station-name">${cam.name}</span>
+                        <div id="status-${cam.id}" class="status-indicator">INITIALIZING</div>
+                    </div>
+                    <div id="cycle-count-${cam.id}" class="cycle-badge">Cycle: 0</div>
                 </div>
                 
                 <div class="progress-container">
@@ -76,7 +79,7 @@ function renderCameraGrid(cameras) {
 
 // Real-time Updates via SocketIO
 socket.on('step_update', (data) => {
-    const { camera_id, current_step, detected_step, status_msg, hit_count, sop_status, progress_percent, hands_detected, step_index, step_list } = data;
+    const { camera_id, cycle_count, current_step, detected_step, status_msg, hit_count, sop_status, progress_percent, hands_detected, step_index, step_list } = data;
     
     // Update Progress
     const fill = document.getElementById(`progress-${camera_id}`);
@@ -88,6 +91,9 @@ socket.on('step_update', (data) => {
     if (fill) fill.style.width = `${progress_percent}%`;
     if (detectedEle) detectedEle.innerText = detected_step || "Idle";
     if (stepLabel) stepLabel.innerText = current_step;
+    
+    const cycleEle = document.getElementById(`cycle-count-${camera_id}`);
+    if (cycleEle) cycleEle.innerText = `Cycle: ${cycle_count}`;
     
     const msgEle = document.getElementById(`status-msg-${camera_id}`);
     if (msgEle) {

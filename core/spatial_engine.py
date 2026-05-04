@@ -1,5 +1,6 @@
 import time
 import logging
+import os
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Optional
@@ -66,8 +67,17 @@ class SpatialEngine:
         # New: Stability Counters
         self.skip_frames_counter = 0
         self.reset_dwell_start = 0.0
+        self.cycle_count = 0
         
-        logger.info(f"SpatialEngine: Initialized with {len(self.sorted_zones)} prioritized zones. Mode: STRICT_ENFORCEMENT")
+        # [DEBUG] Xóa log cũ mỗi khi khởi động lại hệ thống để dễ theo dõi
+        log_path = "data/logs/spatial_debug.txt"
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write(f"--- NEW SESSION STARTED AT {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            except: pass
+
+        logger.info(f"SpatialEngine [{self.station_id}]: Initialized with {len(self.sorted_zones)} prioritized zones. Mode: STRICT_ENFORCEMENT")
 
     def update(self, hands_data: List[Dict]) -> Dict[str, Any] | None:
         now = time.time()
@@ -134,6 +144,9 @@ class SpatialEngine:
         self.last_update_time = now
         
         self.hand_dist = self._get_hand_distance()
+        
+        # [DEBUG] Ghi log chi tiết ra file cho USER bắt lỗi
+        self._log_spatial_debug(now, hands_data, active_zones)
 
         # 2. Check cooldown sau khi hoàn thành chu kỳ (giữ trạng thái "completed" 1 giây)
         if self._completed_at > 0:
@@ -162,7 +175,7 @@ class SpatialEngine:
                 if self.reset_dwell_start == 0:
                     self.reset_dwell_start = now
                 elif now - self.reset_dwell_start >= 1.0:
-                    logger.info("SpatialEngine: Hand detected at Step 1 (Stable). Resetting Cycle...")
+                    logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Hand detected at Step 1 (Stable). Resetting Cycle...")
                     self.reset()
                     # Sau khi reset, hoàn thành luôn Bước 1 cho chu kỳ mới
                     self._complete_current_step(now)
@@ -182,9 +195,10 @@ class SpatialEngine:
                 # Nếu thấy bất kỳ tay nào vào vùng Bước 1 -> Bắt đầu chu kỳ mới ngay
                 if is_in_current_area:
                     self.waiting_for_start = False
+                    self.cycle_count += 1
                     self.step_start_time = now
                     self.last_completed_time = now  # MỚI: Khóa Skip 1.5s ngay khi vừa chạm tay bắt đầu
-                    logger.info("SpatialEngine: New Cycle STARTED (Hand detected in Step 1 zone)")
+                    logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: New Cycle STARTED (Hand detected in Step 1 zone)")
                 else:
                     # Đang nghỉ: Không bắt lỗi, không báo gì cả
                     self.status_msg = "Sẵn sàng (Đang nghỉ giữa chu kỳ)"
@@ -196,7 +210,7 @@ class SpatialEngine:
             # --- TÍNH NĂNG MỚI: Kiểm tra quá thời gian chờ (Transition Timeout) ---
             timeout_limit = current_step.get("timeout_sec", self.config.get("transition_timeout_sec", 15.0))
             if elapsed > timeout_limit:
-                logger.warning(f"!!! [TIMEOUT] Step {self.current_step_idx+1} ({current_step['step_name']}) timed out after {elapsed:.1f}s (Limit: {timeout_limit}s)")
+                logger.warning(f"[Cycle {self.cycle_count}] !!! [TIMEOUT] Step {self.current_step_idx+1} ({current_step['step_name']}) timed out after {elapsed:.1f}s (Limit: {timeout_limit}s)")
                 self.is_failed = True
                 self.violation_type = "timeout"
                 self.failed_step_idx = self.current_step_idx
@@ -207,7 +221,11 @@ class SpatialEngine:
             
             # LUÔN LUÔN gọi bộ đếm logic và kiểm tra hoàn thành bước ngay lập tức
             if self._check_step_logic(current_step, now):
-                self._complete_current_step(now)
+                # NGĂN CHẶN NHẨY BƯỚC (Machine Gun Completion):
+                # Phải ở trong bước ít nhất một khoảng thời gian (mặc định 0.5s)
+                min_dwell = self.config.get("min_step_dwell_sec", 0.5)
+                if now - self.step_start_time >= min_dwell:
+                    self._complete_current_step(now)
 
             if is_in_current_area:
                 self.status_msg = f"Đang thực hiện: {current_step['step_name']}"
@@ -222,13 +240,19 @@ class SpatialEngine:
                     # Chỉ check nếu vùng Step 1 khác vùng hiện tại (hoặc nếu tay thực sự ở vùng Step 1 mà không phải vùng hiện tại)
                     if step_1.get("required_zone") not in current_zones:
                         # CHẶN LỖI OAN: Không báo restart nếu đây là vùng vừa làm xong (đang rút tay ra)
-                        if step_1.get("required_zone") == self.last_completed_zone and (now - self.last_completed_time < 2.5):
+                        # Tăng thời gian chờ từ 2.5s lên 5.0s vì Step 1 và Step 6 có thể chung vùng 'mold'
+                        if step_1.get("required_zone") == self.last_completed_zone and (now - self.last_completed_time < 5.0):
                              pass
-                        elif self._check_step_logic(step_1, now, update_status=False, centroid_only=True):
-                            logger.warning(f"!!! [PREMATURE RESTART] Cycle restarted at Step 1 while current at Step {self.current_step_idx+1}")
-                            self.is_failed = True
-                            self.failed_step_idx = self.current_step_idx
-                            return self._get_status_result(active_zones, "violation", violation_type="premature_restart")
+                        else:
+                            # FIX: Kiểm tra trực tiếp xem tay có ở vùng Bước 1 không (không phụ thuộc vào _zone_last_seen)
+                            s1_zone = step_1.get("required_zone")
+                            is_in_s1 = any(self._is_in_zone(side, s1_zone, centroid_only=True) for side in ["left", "right"])
+                            
+                            if is_in_s1 or self._check_step_logic(step_1, now, update_status=False, centroid_only=True):
+                                logger.warning(f"[Cycle {self.cycle_count}] !!! [PREMATURE RESTART] Cycle restarted at Step 1 while current at Step {self.current_step_idx+1}")
+                                self.is_failed = True
+                                self.failed_step_idx = self.current_step_idx
+                                return self._get_status_result(active_zones, "violation", violation_type="premature_restart")
 
             # --- ƯU TIÊN 2: Chỉ khi THỰC SỰ KHÔNG ở vùng đúng, mới check xem có Skip không ---
             
@@ -258,7 +282,7 @@ class SpatialEngine:
                     # Tăng độ trễ cho bắt lỗi Skip (gấp 4 lần tolerance để tránh nhạy quá)
                     tolerance = self.config.get("violation_tolerance", 3) * 4
                     if self.skip_frames_counter >= tolerance:
-                        logger.warning(f"!!! [SKIP DETECTED] Step {self.current_step_idx+1} skipped. Direct to Step {i+1}")
+                        logger.warning(f"[Cycle {self.cycle_count}] !!! [SKIP DETECTED] Step {self.current_step_idx+1} skipped. Direct to Step {i+1}")
                         self.is_failed = True
                         self.failed_step_idx = self.current_step_idx
                         return self._get_status_result(active_zones, "violation", violation_type="skip_step")
@@ -267,28 +291,61 @@ class SpatialEngine:
             if not future_step_detected:
                 self.skip_frames_counter = 0
 
-        # LOGGING CHI TIẾT (Mỗi 10 frames để theo dõi trên console)
-        if not hasattr(self, '_loop_count'): self._loop_count = 0
-        self._loop_count += 1
-        if self._loop_count % 10 == 0:
-            cur_step = self.sop_steps[self.current_step_idx] if self.current_step_idx < len(self.sop_steps) else None
-            if cur_step:
-                target_zone = cur_step.get("required_zone") or cur_step.get("left_zone") or "N/A"
-                active_hand = cur_step.get("active_hand", "any")
-                
-                # In chi tiết ra terminal để debug
-                print(f"\r[DEBUG] BƯỚC {self.current_step_idx+1}: {cur_step['step_name']} | Đợi: {active_hand.upper()} trong {target_zone} | Hiện tại: L={active_zones['left']} R={active_zones['right']}", end="")
-            
-            # Giữ nguyên log file để lưu trữ
-            logger.info(f"SOP: Step {self.current_step_idx+1} | {self.status_msg} | L:{active_zones['left']} R:{active_zones['right']}")
-
         return self._get_status_result(active_zones, "processing")
+
+    def _log_spatial_debug(self, now, hands_data, active_zones):
+        """Ghi log chi tiết tọa độ và vùng ra file data/logs/spatial_debug.txt"""
+        log_path = "data/logs/spatial_debug.txt"
+        
+        # Tạo thư mục nếu chưa có
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        
+        # Chỉ log khi có tay
+        if not hands_data:
+            return
+            
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                time_str = time.strftime("%H:%M:%S", time.localtime(now)) + f".{int((now % 1) * 1000):03d}"
+                
+                # Thông tin chung
+                step_info = f"Step {self.current_step_idx + 1}"
+                if self.is_failed: step_info += " (FAILED)"
+                
+                log_line = f"[{time_str}] [Cycle {self.cycle_count}] [{step_info}] "
+                
+                # Thông tin từng tay
+                hands_detail = []
+                for side in ["left", "right"]:
+                    # Tìm hand data tương ứng
+                    h_data = next((h for h in hands_data if h["label"].lower() == side), None)
+                    if h_data:
+                        cx, cy = h_data["centroid"]
+                        zone = active_zones.get(side, "None")
+                        hands_detail.append(f"{side.upper()}: ({cx:.3f}, {cy:.3f}) in {zone}")
+                    else:
+                        hands_detail.append(f"{side.upper()}: MISSING")
+                
+                log_line += " | ".join(hands_detail)
+                
+                # Nếu đang ở Step 7 hoặc 8, log thêm check restart
+                if self.current_step_idx >= 6:
+                    step_1_zone = self.sop_steps[0].get("required_zone")
+                    # Check thử xem có tay nào chạm mold không
+                    is_in_s1 = any(self._is_in_zone(s, step_1_zone, centroid_only=True) for s in ["left", "right"])
+                    log_line += f" | MOLD_HIT: {is_in_s1}"
+                
+                f.write(log_line + "\n")
+        except Exception as e:
+            # Không để lỗi ghi log làm crash hệ thống
+            pass
 
     def _complete_current_step(self, now: float):
         """Hỗ trợ chốt bước và chuyển trạng thái"""
         step = self.sop_steps[self.current_step_idx]
         step_num = step.get("step_order", self.current_step_idx + 1)
-        logger.info(f"SpatialEngine: Step {step_num} COMPLETED.")
+        duration = now - self.step_start_time
+        logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Step {step_num} COMPLETED in {duration:.1f}s.")
         
         self.last_completed_zone = step.get("required_zone")
         self.last_completed_time = now
@@ -305,7 +362,7 @@ class SpatialEngine:
         self._zone_last_seen = {}
         
         if self.current_step_idx >= len(self.sop_steps):
-            logger.info("SpatialEngine: COMPLETE SOP CYCLE!")
+            logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: COMPLETE SOP CYCLE!")
             self._completed_at = now
 
     def _get_all_zones_for_step(self, step: Dict) -> List[str]:
@@ -340,6 +397,7 @@ class SpatialEngine:
             "is_failed": self.is_failed,
             "failed_step_idx": self.failed_step_idx,
             "hit_count": self.hit_count,
+            "cycle_count": self.cycle_count,
             "hands_info": active_zones,
             "step_list": step_list
         }
@@ -560,7 +618,7 @@ class SpatialEngine:
         self.last_hands = []
         self.last_trigger_states = {}
         self.waiting_for_start = True # Luôn chờ tay vào Bước 1 mới bắt đầu tính giờ
-        logger.info("SpatialEngine: Resetting all states. Waiting for Step 1 start...")
+        logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Resetting all states. Waiting for Step 1 start...")
         
         self.active_step_time = 0.0
         self.last_update_time = time.time()

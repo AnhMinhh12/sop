@@ -20,6 +20,7 @@ from app import routes
 def emit_step_update(camera_id, status_data, hands_detected):
     socketio.emit('step_update', {
         'camera_id': camera_id,
+        'cycle_count': status_data.get('cycle_count', 0),
         'current_step': status_data.get('expected_step', 'Ready'),
         'detected_step': status_data.get('detected_label', 'Idle'),
         'status_msg': status_data.get('status_msg', ''),

@@ -74,3 +74,4 @@ config:
   violation_tolerance: 3
   idle_timeout_frames: 120
   transition_timeout_sec: 15.0
+  min_step_dwell_sec: 0.5
