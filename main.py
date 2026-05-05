@@ -32,13 +32,15 @@ from db.cleanup import StorageCleanup
 from app import app as flask_app, socketio, processors
 
 # Đảm bảo các thư mục dữ liệu tồn tại
-os.makedirs("data/logs", exist_ok=True)
-os.makedirs("data/violations", exist_ok=True)
+LOG_DIR = os.getenv("LOGS_DIR", "data/logs")
+VIOLATIONS_DIR = os.getenv("VIOLATIONS_DIR", "data/violations")
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(VIOLATIONS_DIR, exist_ok=True)
 
 # Cấu hình log chuyên nghiệp
 # Đảm bảo StreamHandler sử dụng sys.stdout đã được reconfigure
 console_handler = logging.StreamHandler(sys.stdout)
-file_handler = logging.FileHandler("data/logs/system.log", encoding='utf-8')
+file_handler = logging.FileHandler(os.getenv("LOG_FILE", "data/logs/system.log"), encoding='utf-8')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,19 +87,19 @@ def start_sop_monitoring():
     logger.info("Main: Initializing system services...")
     storage_cfg = config.get("storage", {})
     cleanup = StorageCleanup(
-        violations_dir=storage_cfg.get("violations_dir", "data/violations"),
+        violations_dir=storage_cfg.get("violations_dir", os.getenv("VIOLATIONS_DIR", "data/violations")),
         max_usage_percent=storage_cfg.get("max_disk_usage_percent", 85.0),
         retention_days=storage_cfg.get("retention_days", 30)
     )
     cleanup.start()
 
     logger.info("Main: Creating ClipSaver...")
-    clip_saver = ClipSaver(output_dir="data/violations", fps=yolo_cfg.get("fps_cap", 15))
+    clip_saver = ClipSaver(output_dir=os.getenv("VIOLATIONS_DIR", "data/violations"), fps=yolo_cfg.get("fps_cap", 15))
 
     logger.info("Main: Creating AudioAlert (Safe Mode)...")
     audio_alert = None
     try:
-        audio_alert = AudioAlert(sound_file="sounds/alert.wav")
+        audio_alert = AudioAlert(sound_file=os.getenv("ALERT_SOUND_PATH", "sounds/alert.wav"))
     except Exception as e:
         logger.error(f"Main: AudioAlert failed to init: {e}. System will continue without audio.")
 
@@ -141,13 +143,15 @@ def start_sop_monitoring():
         processor.start()
         logger.info(f"Main: Station {cam_id} is now ACTIVE & SYNCED to MySQL.")
 
-    # 6. Chạy Web Dashboard
+    # Chạy Web Dashboard ở chế độ đa luồng (threading)
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", 5001))
+    
     logger.info("====================================================")
-    logger.info("  DASHBOARD IS READY AT: http://localhost:5001")
+    logger.info(f"  DASHBOARD IS READY AT: http://{host}:{port}")
     logger.info("====================================================")
 
-    # Khởi chạy Web Dashboard ở chế độ đa luồng (threading)
-    socketio.run(flask_app, host='0.0.0.0', port=5001,
+    socketio.run(flask_app, host=host, port=port,
                  debug=False, use_reloader=False,
                  log_output=True, allow_unsafe_werkzeug=True)
 

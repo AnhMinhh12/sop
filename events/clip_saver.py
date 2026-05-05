@@ -13,8 +13,8 @@ class ClipSaver:
     Handles saving video clips when an SOP violation occurs.
     Combines pre-event buffer frames with post-event frames.
     """
-    def __init__(self, output_dir: str = "data/violations", fps: int = 15):
-        self.output_dir = output_dir
+    def __init__(self, output_dir: Optional[str] = None, fps: int = 15):
+        self.output_dir = output_dir or os.getenv("VIOLATIONS_DIR", "data/violations")
         self.fps = fps
         
         if not os.path.exists(output_dir):

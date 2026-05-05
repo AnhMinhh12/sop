@@ -9,7 +9,7 @@ class ConfigLoader:
     """
     Utility to load and parse YAML configuration files.
     """
-    CONFIG_PATH = "config/config.yaml"
+    CONFIG_PATH = os.getenv("CONFIG_PATH", "config/config.yaml")
 
     @staticmethod
     def load_config() -> Dict[str, Any]:
@@ -34,7 +34,8 @@ class ConfigLoader:
         """
         Loads the SOP steps definition for a specific station.
         """
-        sop_path = f"config/sop_definitions/station_{station_id}.yaml"
+        base_dir = os.getenv("SOP_DEFINITIONS_DIR", "config/sop_definitions")
+        sop_path = os.path.join(base_dir, f"station_{station_id}.yaml")
         if not os.path.exists(sop_path):
             logger.warning(f"SOP definition for station {station_id} not found at {sop_path}. Using empty.")
             return {"station_id": station_id, "steps": []}

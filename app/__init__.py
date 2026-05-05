@@ -8,7 +8,7 @@ from typing import Dict, Any
 app = Flask(__name__, 
             template_folder='templates', 
             static_folder='static')
-app.config['SECRET_KEY'] = 'sop_monitoring_secret'
+app.config['SECRET_KEY'] = os.getenv("APP_SECRET_KEY", "sop_monitoring_secret_default")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global storage for processors
