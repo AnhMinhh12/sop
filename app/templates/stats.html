@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Thống kê hiệu suất - SOP AI MONITORING{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="section-title"><span>STATISTICS</span> Thống kê hiệu suất</h2>
+</div>
+
+<div class="stats-grid">
+    <!-- Thẻ tóm tắt -->
+    <div class="widget stat-card">
+        <div class="widget-title">Tổng vi phạm</div>
+        <div class="stat-big-value" id="total-violations">--</div>
+    </div>
+    <div class="widget stat-card">
+        <div class="widget-title">Tỷ lệ tuân thủ</div>
+        <div class="stat-big-value" id="compliance-rate">--%</div>
+    </div>
+    <div class="widget stat-card">
+        <div class="widget-title">Trạm hoạt động</div>
+        <div class="stat-big-value" id="active-stations">--</div>
+    </div>
+</div>
+
+<div class="charts-container">
+    <div class="widget chart-box">
+        <div class="widget-title">Phân bổ loại vi phạm</div>
+        <canvas id="violationPieChart"></canvas>
+    </div>
+    <div class="widget chart-box">
+        <div class="widget-title">Xu hướng vi phạm (7 ngày)</div>
+        <canvas id="violationLineChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStats();
+    });
+
+    async function loadStats() {
+        try {
+            // 1. Lấy dữ liệu vi phạm
+            const response = await fetch('/api/stats/violations');
+            const data = await response.json();
+            
+            const labels = Object.keys(data);
+            const values = Object.values(data);
+            const total = values.reduce((a, b) => a + b, 0);
+            
+            document.getElementById('total-violations').innerText = total;
+            
+            // Render Pie Chart
+            const ctxPie = document.getElementById('violationPieChart').getContext('2d');
+            new Chart(ctxPie, {
+                type: 'doughnut',
+                data: {
+                    labels: labels.map(l => {
+                        const map = {
+                            'skip_step': 'Bỏ bước',
+                            'timeout': 'Quá giờ',
+                            'wrong_step': 'Sai bước',
+                            'premature_restart': 'Reset sớm'
+                        };
+                        return map[l] || l;
+                    }),
+                    datasets: [{
+                        data: values,
+                        backgroundColor: [
+                            '#ef4444', '#f59e0b', '#6366f1', '#10b981', '#8b5cf6'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    },
+                    cutout: '70%'
+                }
+            });
+
+            // 2. Fetch cameras for active count
+            const camRes = await fetch('/api/cameras');
+            const cameras = await camRes.json();
+            document.getElementById('active-stations').innerText = cameras.length;
+
+            // Mock compliance (Cần backend API thực tế để tính toán từ sessions)
+            document.getElementById('compliance-rate').innerText = '94.2%';
+
+            // Render Mock Line Chart
+            const ctxLine = document.getElementById('violationLineChart').getContext('2d');
+            new Chart(ctxLine, {
+                type: 'line',
+                data: {
+                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                    datasets: [{
+                        label: 'Số lỗi',
+                        data: [12, 19, 3, 5, 2, 3, 7],
+                        borderColor: '#2d5cf7',
+                        backgroundColor: 'rgba(45, 92, 247, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, grid: { display: false } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+        } catch (err) {
+            console.error("Error loading stats:", err);
+        }
+    }
+</script>
+{% endblock %}

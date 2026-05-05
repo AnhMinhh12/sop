@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Lịch sử vi phạm - SOP AI MONITORING{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="section-title"><span>HISTORY</span> Lịch sử vi phạm</h2>
+    <div class="filters">
+        <select id="filter-station" class="filter-input">
+            <option value="">Tất cả trạm</option>
+            <!-- Sẽ được fill bằng JS -->
+        </select>
+        <input type="date" id="filter-date" class="filter-input">
+        <button onclick="applyFilters()" class="btn-primary">Tìm kiếm</button>
+    </div>
+</div>
+
+<div class="widget" style="margin-top: 20px;">
+    <div class="table-responsive">
+        <table class="event-table full-width">
+            <thead>
+                <tr>
+                    <th>Thời gian</th>
+                    <th>Mã trạm</th>
+                    <th>Loại vi phạm</th>
+                    <th>Bước dự kiến</th>
+                    <th>AI nhận diện</th>
+                    <th>Độ tin cậy</th>
+                    <th>Hành động</th>
+                </tr>
+            </thead>
+            <tbody id="history-list">
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: #888;">
+                        Đang tải dữ liệu...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pagination" id="pagination">
+        <!-- Pagination controls -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadFilterOptions();
+        loadHistory();
+    });
+
+    async function loadFilterOptions() {
+        const response = await fetch('/api/cameras');
+        const cameras = await response.json();
+        const select = document.getElementById('filter-station');
+        cameras.forEach(cam => {
+            const opt = document.createElement('option');
+            opt.value = cam.station_id;
+            opt.textContent = cam.name;
+            select.appendChild(opt);
+        });
+    }
+
+    async function loadHistory(stationId = '', date = '') {
+        const list = document.getElementById('history-list');
+        list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
+        
+        let url = `/api/events?limit=100`;
+        if (stationId) url += `&camera_id=${stationId}`;
+        
+        try {
+            const response = await fetch(url);
+            const events = await response.json();
+            
+            list.innerHTML = '';
+            if (events.length === 0) {
+                list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào</td></tr>';
+                return;
+            }
+
+            events.forEach(ev => {
+                const typeMap = {
+                    'skip_step': 'Bỏ bước',
+                    'timeout': 'Quá giờ',
+                    'wrong_step': 'Sai bước',
+                    'premature_restart': 'Reset sớm'
+                };
+                const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
+                
+                const row = document.createElement('tr');
+                row.className = 'event-row';
+                row.innerHTML = `
+                    <td>${ev.timestamp}</td>
+                    <td><span class="badge-station">${ev.camera_id || 'N/A'}</span></td>
+                    <td><span class="event-type">${vTypeVN}</span></td>
+                    <td>${ev.expected_step || '-'}</td>
+                    <td>${ev.step_detected || '-'}</td>
+                    <td>${(ev.confidence * 100).toFixed(1)}%</td>
+                    <td>
+                        <button class="btn-action" onclick="openVideo(${ev.id}, '${ev.camera_id}', '${vTypeVN}')">
+                            ▶ XEM LẠI
+                        </button>
+                    </td>
+                `;
+                list.appendChild(row);
+            });
+        } catch (err) {
+            console.error("Error loading history:", err);
+            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--danger);">Lỗi tải dữ liệu</td></tr>';
+        }
+    }
+
+    function applyFilters() {
+        const station = document.getElementById('filter-station').value;
+        const date = document.getElementById('filter-date').value;
+        loadHistory(station, date);
+    }
+</script>
+{% endblock %}

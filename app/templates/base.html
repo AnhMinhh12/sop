@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SOP AI MONITORING - HTMP SYSTEMS{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <h1>SOP AI <span>MONITORING</span></h1>
+        </div>
+
+        <nav class="nav-tabs">
+            <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Dashboard</a>
+            <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">Lịch sử</a>
+            <a href="/stats" class="nav-link {% if request.path == '/stats' %}active{% endif %}">Thống kê</a>
+        </nav>
+
+        <div class="system-stats-compact">
+            <div class="stat-item">
+                <span class="stat-label">CPU</span>
+                <span id="cpu-val" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">RAM</span>
+                <span id="ram-val" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">DISK</span>
+                <span id="disk-val" class="stat-value">--</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Global Components -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <div id="video-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Replay Violation</h3>
+                <div class="modal-close" onclick="closeModal()">×</div>
+            </div>
+            <video id="replay-video" controls autoplay>
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

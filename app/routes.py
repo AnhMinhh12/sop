@@ -16,6 +16,18 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/history')
+def history():
+    """Trang lịch sử vi phạm."""
+    return render_template('history.html')
+
+
+@app.route('/stats')
+def stats():
+    """Trang thống kê quy trình."""
+    return render_template('stats.html')
+
+
 def gen_frames(camera_id: str):
     """Máy phát luồng MJPEG cho trình duyệt."""
     while True:

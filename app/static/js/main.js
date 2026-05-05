@@ -8,22 +8,30 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initDashboard() {
-    console.log("Initializing SOP Monitoring Dashboard...");
+    console.log("Checking page context...");
     
-    // 1. Load Cameras
-    try {
-        const response = await fetch('/api/cameras');
-        const cameras = await response.json();
-        renderCameraGrid(cameras);
-    } catch (err) {
-        console.error("Failed to load cameras:", err);
+    // 1. Load Cameras if on Dashboard
+    const grid = document.getElementById('camera-grid');
+    if (grid) {
+        try {
+            const response = await fetch('/api/cameras');
+            const cameras = await response.json();
+            renderCameraGrid(cameras);
+        } catch (err) {
+            console.error("Failed to load cameras:", err);
+        }
     }
 
-    // 2. Load Initial Events
-    loadRecentEvents();
+    // 2. Load Initial Events if on Dashboard
+    if (document.getElementById('event-list')) {
+        loadRecentEvents();
+    }
 
-    // 3. Sys Health Every 5s
-    setInterval(updateSystemHealth, 5000);
+    // 3. Sys Health Every 5s (Always update if elements exist)
+    if (document.getElementById('cpu-val')) {
+        updateSystemHealth();
+        setInterval(updateSystemHealth, 5000);
+    }
 }
 
 function renderCameraGrid(cameras) {
@@ -230,9 +238,11 @@ function showToast({ title, body, details, time }) {
 
 async function loadRecentEvents() {
     try {
+        const list = document.getElementById('event-list');
+        if (!list) return;
+
         const response = await fetch('/api/events?limit=10');
         const events = await response.json();
-        const list = document.getElementById('event-list');
         list.innerHTML = '';
 
         events.forEach(ev => {
