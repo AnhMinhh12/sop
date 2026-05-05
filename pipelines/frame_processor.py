@@ -54,7 +54,7 @@ class FrameProcessor:
         self.spatial_engine = spatial_engine
         self.violation_detector = violation_detector
         
-        self.ring_buffer = FrameRingBuffer(self.fps, 20)  # Tăng lên 20s để chứa 10s trước và 10s sau
+        self.ring_buffer = FrameRingBuffer(self.fps, 10)  # 5s trước + 5s sau = 10s tổng
         self.audio_alert = audio_alert
         self.clip_saver = clip_saver
 
@@ -169,8 +169,8 @@ class FrameProcessor:
             emit_violation(self.cam_id, violation)
             
             # 3. Đợi 10 giây để thu thập phần 'sau lỗi' vào ring buffer
-            logger.info(f"FrameProcessor [{self.cam_id}]: Violation detected. Waiting 10s for post-event frames...")
-            time.sleep(10)
+            logger.info(f"FrameProcessor [{self.cam_id}]: Violation detected. Waiting 5s for post-event frames...")
+            time.sleep(5)
             
             # 4. Lấy toàn bộ frames (Lúc này buffer chứa 10s trước + 10s sau)
             frames_to_save = self.ring_buffer.get_all()

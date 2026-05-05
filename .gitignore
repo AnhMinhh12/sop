@@ -3,8 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Environments
+# Environments (Rất quan trọng - Chứa mật khẩu DB)
 .env
+.env.example
 .venv
 env/
 venv/
@@ -13,22 +14,37 @@ env.bak/
 venv.bak/
 
 # Project Data & Large Files
-data/
+data/violations/*
+data/logs/*
+!data/violations/.gitkeep
+!data/logs/.gitkeep
 training/data/
 training/raw_frames/
 training/results/
+
+# Media and Models
 *.zip
 *.7z
 *.rar
 *.mp4
 *.avi
+*.mov
 *.jpg
 *.png
 *.onnx
+*.pt
+*.db
+*.sqlite
+
+# Keep production models
 !models/yolo/best.onnx
 !models/lstm/step_classifier.pt
+!models/lstm/label_map.json
 
 # IDEs
 .vscode/
 .idea/
 .gemini/
+*.log
+desktop.ini
+Thumbs.db

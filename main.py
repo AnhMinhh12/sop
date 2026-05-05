@@ -83,9 +83,11 @@ def start_sop_monitoring():
 
     # 4. Khởi tạo các dịch vụ toàn hệ thống
     logger.info("Main: Initializing system services...")
+    storage_cfg = config.get("storage", {})
     cleanup = StorageCleanup(
-        violations_dir="data/violations",
-        max_usage_percent=85.0
+        violations_dir=storage_cfg.get("violations_dir", "data/violations"),
+        max_usage_percent=storage_cfg.get("max_disk_usage_percent", 85.0),
+        retention_days=storage_cfg.get("retention_days", 30)
     )
     cleanup.start()
 
@@ -99,7 +101,9 @@ def start_sop_monitoring():
     except Exception as e:
         logger.error(f"Main: AudioAlert failed to init: {e}. System will continue without audio.")
 
-    # 5. Khởi tạo từng trạm Camera
+    # 5. Khởi tạo từng trạm Camera và đồng bộ Database
+    from db.queries import CameraQueries, DefinitionQueries
+
     logger.info(f"Main: Found {len(config['cameras'])} cameras in config.")
     for cam_cfg in config["cameras"]:
         cam_id = cam_cfg["id"]
@@ -110,6 +114,13 @@ def start_sop_monitoring():
         # Load SOP (Phiên bản ZONES mới)
         clean_sid = station_id.replace("station_", "")
         sop_def = ConfigLoader.load_sop_definition(clean_sid)
+        
+        # --- ĐỒNG BỘ MYSQL: Lưu quy trình và camera vào DB để dashboard sử dụng ---
+        def_name = sop_def.get("station_name", f"SOP {station_id}")
+        def_id = DefinitionQueries.upsert_definition(def_name, total_steps=len(sop_def.get("steps", [])))
+        if def_id:
+            DefinitionQueries.sync_steps(def_id, sop_def.get("steps", []))
+            CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], def_id)
         
         # New Reformed Engine
         spatial_engine = SpatialEngine(sop_def)
@@ -128,7 +139,7 @@ def start_sop_monitoring():
         # Lưu vào registry và Khởi chạy
         processors[cam_id] = processor
         processor.start()
-        logger.info(f"Main: Station {cam_id} is now ACTIVE (Spatial Based).")
+        logger.info(f"Main: Station {cam_id} is now ACTIVE & SYNCED to MySQL.")
 
     # 6. Chạy Web Dashboard
     logger.info("====================================================")
