@@ -40,7 +40,9 @@ class SpatialEngine:
         
         # New: Quản lý lỗi và Reset
         self.is_failed = False
+        self.violation_notified = False # Cờ đánh dấu đã báo lỗi chu kỳ này
         self.failed_step_idx = -1
+        self.violation_type = None
         self.last_completed_zone = None
         self.last_completed_time = 0.0
         self.status_msg = "Sẵn sàng"
@@ -176,7 +178,7 @@ class SpatialEngine:
                     self.reset_dwell_start = now
                 elif now - self.reset_dwell_start >= 1.0:
                     logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Hand detected at Step 1 (Stable). Resetting Cycle...")
-                    self.reset()
+                    self.reset(now=now)
                     # Sau khi reset, hoàn thành luôn Bước 1 cho chu kỳ mới
                     self._complete_current_step(now)
             else:
@@ -404,11 +406,19 @@ class SpatialEngine:
 
         # Nếu đang ở trạng thái lỗi
         if self.is_failed:
-            # Ghi lại loại lỗi nếu mới được truyền vào
             if violation_type: self.violation_type = violation_type
+            
+            # Nếu chưa báo lỗi thì báo 'violation' để kích hoạt loa/clip
+            if not self.violation_notified:
+                self.violation_notified = True
+                status = "violation"
+            else:
+                # Đã báo rồi thì im lặng (processing_failed) để UI vẫn đỏ nhưng không kêu loa
+                status = "failed_silent"
+
             base_res.update({
                 "detected_label": "VI PHẠM - QUAY LẠI BƯỚC 1",
-                "sop_status": "violation",
+                "sop_status": status,
                 "violation_type": self.violation_type or "skip_step"
             })
             return base_res
@@ -578,11 +588,15 @@ class SpatialEngine:
                 test_points = [centroid]
             else:
                 bbox = hand["bbox"]  # [x1, y1, x2, y2]
-                # Kiểm tra 5 điểm (Tâm + 4 góc) theo đúng cấu trúc cũ của bạn
+                # Kiểm tra 9 điểm (Tâm + 4 góc + 4 trung điểm cạnh) để nhạy hơn ở mép vùng
                 test_points = [
                     centroid,
                     [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h],
-                    [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]
+                    [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h],
+                    [(bbox[0]+bbox[2])/(2*w), bbox[1]/h], # Mid-top
+                    [(bbox[0]+bbox[2])/(2*w), bbox[3]/h], # Mid-bottom
+                    [bbox[0]/w, (bbox[1]+bbox[3])/(2*h)], # Mid-left
+                    [bbox[2]/w, (bbox[1]+bbox[3])/(2*h)]  # Mid-right
                 ]
             
             if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
@@ -611,14 +625,18 @@ class SpatialEngine:
             return np.sqrt((l_pos[0]-r_pos[0])**2 + (l_pos[1]-r_pos[1])**2)
         return -1.0
 
-    def reset(self) -> None:
+    def reset(self, now: float = None) -> None:
         """Reset SOP State Machine về đầu cycle"""
         self.current_step_idx = 0
-        self.step_start_time = time.time()
+        self.is_failed = False
+        self.violation_notified = False # Cờ đánh dấu đã báo lỗi chu kỳ này
+        self.violation_type = None
+        self.failed_step_idx = -1
+        self.step_start_time = now if now else time.time()
+        
         self.last_hands = []
         self.last_trigger_states = {}
         self.waiting_for_start = True # Luôn chờ tay vào Bước 1 mới bắt đầu tính giờ
-        logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Resetting all states. Waiting for Step 1 start...")
         
         self.active_step_time = 0.0
         self.last_update_time = time.time()
@@ -626,13 +644,9 @@ class SpatialEngine:
         self._stay_timer = {}
         self.hit_count = 0
         self.last_trigger_state = False
-        self.is_failed = False
-        self.failed_step_idx = -1
-        self.violation_type = None
+        
         self.last_completed_zone = None
-        self.last_completed_time = time.time()  # MỚI: Khóa Skip 1.5s đầu chu kỳ
-        self.skip_frames_counter = 0
-        self.reset_dwell_start = 0.0
-        for side in ["left", "right"]:
-            self.hand_states[side] = {"zone": None, "entry_time": time.time()}
-            self.hand_history[side].clear()
+        self.last_completed_time = time.time()  # Khóa Skip 1.5s đầu chu kỳ
+        self.reset_dwell_start = 0
+        
+        logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Resetting all states. Waiting for Step 1 start...")

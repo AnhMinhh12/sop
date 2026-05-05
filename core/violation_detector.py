@@ -26,7 +26,9 @@ class ViolationDetector:
         status = sm_status.get("sop_status")
         violation_type = sm_status.get("violation_type")
 
-        if violation_type:
+        # FIX: Only trigger if engine explicitly says 'violation'. 
+        # This prevents repeated triggers during 'failed_silent' state.
+        if status == "violation" and violation_type:
             current_time = time.time()
 
             # Cooldown: không trigger cùng loại vi phạm trong cùng 1 bước trong khoảng thời gian ngắn
@@ -53,8 +55,9 @@ class ViolationDetector:
                 "total_violations": self.violation_count,
             }
         else:
-            # Reset khi trở lại trạng thái bình thường
-            if status in ["correct", "idle", "completed"]:
+            # Reset khi trở lại trạng thái bình thường (Thêm 'processing' và 'idle')
+            if status in ["correct", "idle", "completed", "processing"]:
                 self.last_violation_type = None
+                self.last_violation_step = None
 
         return None

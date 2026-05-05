@@ -39,7 +39,7 @@ steps:
     step_name: "Lắp Terminal vào Slider"
     logic: "stay_in_zone"
     required_zone: "middle_table"
-    min_duration_sec: 3.0
+    min_duration_sec: 2.0
     active_hand: "both"
 
   - step_order: 6
@@ -66,12 +66,12 @@ steps:
     step_name: "Check Jig & Hoàn thành"
     logic: "stay_in_zone"
     required_zone: "jig_zone"
-    min_duration_sec: 2.0
+    min_duration_sec: 1.5
     active_hand: "any"
     timeout_sec: 10.0
 
 config:
-  violation_tolerance: 3
+  violation_tolerance: 8
   idle_timeout_frames: 120
   transition_timeout_sec: 15.0
-  min_step_dwell_sec: 0.5
+  min_step_dwell_sec: 0.1
