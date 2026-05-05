@@ -442,14 +442,25 @@ class SpatialEngine:
             if target not in self._zone_last_seen:
                 self._zone_last_seen[target] = {"left": 0, "right": 0}
             
-            # Cập nhật timestamp lần cuối mỗi tay chạm vùng mục tiêu
-            for side in ["left", "right"]:
-                if self._is_in_zone(side, target, centroid_only=centroid_only):
-                    self._zone_last_seen[target][side] = now
+            # FIX: Only update history timestamps if this is the active step
+            if update_status:
+                for side in ["left", "right"]:
+                    if self._is_in_zone(side, target, centroid_only=centroid_only):
+                        self._zone_last_seen[target][side] = now
+            
+            # For skip-checks, we should probably check current frame OR a temporary local seen state
+            # but current frame (self._is_in_zone) is safest for skip detection.
+            # However, to maintain the 'grace' logic without side effects, we check CURRENTLY in zone.
+            is_left_in_now = any(h["label"].lower() == "left" and self._is_in_zone("left", target, centroid_only=centroid_only) for h in self.last_hands)
+            is_right_in_now = any(h["label"].lower() == "right" and self._is_in_zone("right", target, centroid_only=centroid_only) for h in self.last_hands)
+
+            # Combine history (with grace) and current state
+            effective_left = (now - self._zone_last_seen[target]["left"] < grace) or is_left_in_now
+            effective_right = (now - self._zone_last_seen[target]["right"] < grace) or is_right_in_now
             
             if mode == "both":
-                is_left_in = now - self._zone_last_seen[target]["left"] < grace
-                is_right_in = now - self._zone_last_seen[target]["right"] < grace
+                is_left_in = effective_left
+                is_right_in = effective_right
                 if update_status:
                     if not is_left_in and not is_right_in: self.status_msg = f"Đợi cả 2 tay vào {target}"
                     elif not is_left_in: self.status_msg = f"Đợi tay TRÁI vào {target}"
@@ -457,9 +468,9 @@ class SpatialEngine:
                 return is_left_in and is_right_in
             
             if mode == "any":
-                return any(now - self._zone_last_seen[target][s] < grace for s in ["left", "right"])
+                return effective_left or effective_right
             else:
-                return now - self._zone_last_seen[target][mode] < grace
+                return effective_left if mode == "left" else effective_right
 
         # === STAY IN ZONE: Giữ tay trong vùng liên tục N giây ===
         elif logic == "stay_in_zone":
@@ -503,11 +514,12 @@ class SpatialEngine:
             for side, zone in [("left", l_zone), ("right", r_zone)]:
                 if zone not in self._zone_last_seen:
                     self._zone_last_seen[zone] = {"left": 0, "right": 0}
-                if self._is_in_zone(side, zone):
+                if update_status and self._is_in_zone(side, zone):
                     self._zone_last_seen[zone][side] = now
             
-            l_met = now - self._zone_last_seen.get(l_zone, {}).get("left", 0) < grace
-            r_met = now - self._zone_last_seen.get(r_zone, {}).get("right", 0) < grace
+            # Check logic using current state for Skip check, or history for Active step
+            l_met = (now - self._zone_last_seen.get(l_zone, {}).get("left", 0) < grace) or self._is_in_zone("left", l_zone)
+            r_met = (now - self._zone_last_seen.get(r_zone, {}).get("right", 0) < grace) or self._is_in_zone("right", r_zone)
             
             if update_status:
                 if not l_met and not r_met: self.status_msg = f"Đợi cả 2 tay vào vùng"
@@ -533,13 +545,11 @@ class SpatialEngine:
                 # Logic đếm độc lập (MỚI): Cứ mỗi lần 1 tay đi vào vùng là +1 lượt
                 for side in ["left", "right"]:
                     is_in = self._is_in_zone(side, target, centroid_only=centroid_only)
-                    
-                    # Đã gỡ bỏ LOG TRACE để terminal sạch sẽ hơn
-
-                    if is_in and not self.last_trigger_states.get(side, False):
-                        self.hit_count += 1
-                        logger.info(f"SpatialEngine: Step 6 hit {self.hit_count}/{count_needed} (Hand: {side} entered)")
-                    self.last_trigger_states[side] = is_in
+                    if update_status:
+                        if is_in and not self.last_trigger_states.get(side, False):
+                            self.hit_count += 1
+                            logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Hand: {side} entered)")
+                        self.last_trigger_states[side] = is_in
                 
                 current_state = self.hit_count >= count_needed
             
@@ -548,18 +558,20 @@ class SpatialEngine:
                 is_left = self._is_in_zone("left", target, centroid_only=centroid_only)
                 is_right = self._is_in_zone("right", target, centroid_only=centroid_only)
                 combined_in = is_left and is_right
-                if combined_in and not self.last_trigger_states.get("both", False):
-                    self.hit_count += 1
-                    logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Both hands)")
-                self.last_trigger_states["both"] = combined_in
+                if update_status:
+                    if combined_in and not self.last_trigger_states.get("both", False):
+                        self.hit_count += 1
+                        logger.info(f"SpatialEngine: Step {self.current_step_idx+1} hit {self.hit_count}/{count_needed} (Both hands)")
+                    self.last_trigger_states["both"] = combined_in
                 current_state = self.hit_count >= count_needed
             
             else:
                 # Logic một tay cụ thể
                 is_in = self._is_in_zone(mode, target, centroid_only=centroid_only)
-                if is_in and not self.last_trigger_states.get(mode, False):
-                    self.hit_count += 1
-                self.last_trigger_states[mode] = is_in
+                if update_status:
+                    if is_in and not self.last_trigger_states.get(mode, False):
+                        self.hit_count += 1
+                    self.last_trigger_states[mode] = is_in
                 current_state = self.hit_count >= count_needed
 
             if update_status:
