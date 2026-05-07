@@ -38,15 +38,17 @@ class FrameProcessor:
 
         self.cam_id = camera_config["id"]
         self.rtsp_url = camera_config["rtsp_url"]
-        self.fps = camera_config.get("fps_cap", 25)
+        # Ưu tiên lấy FPS từ ENV, nếu không có mới lấy từ config/default
+        self.fps = int(os.getenv("AI_FPS_CAP", camera_config.get("fps_cap", 15)))
         self.frame_delay = 1.0 / self.fps
 
         res = camera_config.get("resolution", [1280, 720])
         self._target_w = res[0]
         self._target_h = res[1]
 
-        # Integrations
-        self.stream = RTSPStream(self.cam_id, self.rtsp_url, self.fps)
+        # Integrations — RTSPStream resize ngay tại nguồn để tiết kiệm CPU
+        self.stream = RTSPStream(self.cam_id, self.rtsp_url, self.fps,
+                                 target_width=self._target_w, target_height=self._target_h)
         self.hand_detector = HandDetector(self.cam_id, confidence_threshold=0.15)
         # BỎ MediaPipe KeypointExtractor
 
@@ -59,6 +61,7 @@ class FrameProcessor:
         self.clip_saver = clip_saver
 
         self.running = False
+        self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
         self.current_processed_frame = None
         self.latest_status = {"sop_status": "idle", "progress_percent": 0}
         self._loop_count = 0
@@ -80,17 +83,17 @@ class FrameProcessor:
             loop_start = time.time()
             frame = self.stream.get_frame()
             if frame is None:
-                time.sleep(0.01); continue
+                time.sleep(0.05); continue
 
-            # --- OPTIMIZATION: Hạ độ phân giải xuống HD để mượt mà (Lag fix) ---
-            frame = cv2.resize(frame, (1280, 720))
-            self._target_w, self._target_h = 1280, 720
+            # Frame đã được resize trong RTSPStream — KHÔNG resize lại ở đây
+            self._target_w = frame.shape[1]
+            self._target_h = frame.shape[0]
 
+            # Push frame gốc vào ring buffer (deque tự quản lý bộ nhớ)
             self.ring_buffer.push(frame)
-            display_frame = frame.copy()
             
             # --- AI PROCESSING (YOLO ONLY) ---
-            # Tối ưu: Chỉ chạy AI mỗi 2 frame để đảm bảo video mượt mà (Skip frame)
+            # Chạy AI mỗi 2 frame (~7.5 FPS) — đã chứng minh chính xác cho SOP detection
             hands_data = self._cached_hands
             
             if self._loop_count % 2 == 0:
@@ -126,8 +129,6 @@ class FrameProcessor:
                 hands_data = new_hands_data
                 self._cached_hands = hands_data
 
-            self._cached_hands = hands_data
-
             # 3. Spatial Logic Update
             self.latest_status = self.spatial_engine.update(hands_data)
             
@@ -136,24 +137,31 @@ class FrameProcessor:
             if violation:
                 self._handle_violation(violation)
 
-            # 5. Annotation (Vẽ Box thay vì Xương)
+            # 5. Annotation — TỐI ƯU: Vẽ trực tiếp lên frame đã lấy từ stream (đã là 1 bản copy)
+            # Việc này giúp giảm 1 lần copy ảnh mỗi frame và giúp clip vi phạm có sẵn Bbox để đối soát.
+            display_frame = frame 
             Annotator.draw_zones(display_frame, self.spatial_engine.zones)
             for h in self._cached_hands:
                 bbox = h["bbox"]
                 color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
                 cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
-                # Hiển thị nhãn tay + Tên vùng đang đứng (Để debug trực quan)
-                zone_name = self.latest_status.get("hands_info", {}).get(h["label"], "N/A")
-                cv2.putText(display_frame, f"{h['label'].upper()} ({zone_name})", (int(bbox[0]), int(bbox[1])-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
             self.current_processed_frame = display_frame
             self._loop_count += 1
             
-            # 6. Socket Update - emit ngay khi cycle completed, khong cho moi 5 frame
+            # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame)
             is_completed = self.latest_status.get("sop_status") == "completed"
-            if is_completed or self._loop_count % 5 == 0:
-                emit_step_update(self.cam_id, self.latest_status, self.latest_status["hands_info"])
+            is_violation = self.latest_status.get("sop_status") == "violation"
+            if is_completed:
+                if not self._completion_logged:
+                    self._handle_completion()
+                    self._completion_logged = True
+                emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
+            else:
+                # Reset cờ khi quay lại trạng thái bình thường (processing hoặc violation)
+                self._completion_logged = False
+                if is_violation or self._loop_count % 15 == 0:
+                    emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
 
             elapsed = time.time() - loop_start
             time.sleep(max(0, self.frame_delay - elapsed))
@@ -189,6 +197,18 @@ class FrameProcessor:
                 clip_path=clip_path
             )
             
+        threading.Thread(target=background_task, daemon=True).start()
+
+    def _handle_completion(self):
+        """Xử lý khi hoàn thành 1 chu kỳ SOP thành công."""
+        def background_task():
+            logger.info(f"FrameProcessor [{self.cam_id}]: SOP COMPLETED SUCCESSFULLY. Logging to DB.")
+            EventQueries.log_event(
+                camera_id=self.cam_id,
+                violation_type="success",
+                sop_status="completed",
+                confidence=1.0
+            )
         threading.Thread(target=background_task, daemon=True).start()
 
 

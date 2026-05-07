@@ -176,11 +176,15 @@ class SpatialEngine:
                 # Dwell time 1.0s để tránh vung tay qua là reset ngay
                 if self.reset_dwell_start == 0:
                     self.reset_dwell_start = now
-                elif now - self.reset_dwell_start >= 1.0:
+                elif now - self.reset_dwell_start >= 0.5:
                     logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: Hand detected at Step 1 (Stable). Resetting Cycle...")
                     self.reset(now=now)
+                    # FIX: Tăng số chu kì khi bắt đầu lại (Reset)
+                    self.cycle_count += 1
                     # Sau khi reset, hoàn thành luôn Bước 1 cho chu kỳ mới
                     self._complete_current_step(now)
+                    # FIX: Chặn việc cộng dồn cycle lần nữa ở frame tiếp theo
+                    self.waiting_for_start = False 
             else:
                 self.reset_dwell_start = 0.0
             
@@ -199,6 +203,9 @@ class SpatialEngine:
                     self.waiting_for_start = False
                     self.cycle_count += 1
                     self.step_start_time = now
+                    # Tự động hoàn thành Bước 1 ngay khi chạm (giống logic recovery)
+                    # Điều này giúp UI nhẩy sang Bước 2 ngay lập tức, tránh cảm giác "bắt chậm"
+                    self._complete_current_step(now)
                     self.last_completed_time = now  # MỚI: Khóa Skip 1.5s ngay khi vừa chạm tay bắt đầu
                     logger.info(f"[Cycle {self.cycle_count}] SpatialEngine: New Cycle STARTED (Hand detected in Step 1 zone)")
                 else:
@@ -224,8 +231,8 @@ class SpatialEngine:
             # LUÔN LUÔN gọi bộ đếm logic và kiểm tra hoàn thành bước ngay lập tức
             if self._check_step_logic(current_step, now):
                 # NGĂN CHẶN NHẨY BƯỚC (Machine Gun Completion):
-                # Phải ở trong bước ít nhất một khoảng thời gian (mặc định 0.5s)
-                min_dwell = self.config.get("min_step_dwell_sec", 0.5)
+                # Phải ở trong bước ít nhất một khoảng thời gian (mặc định 0.3s)
+                min_dwell = self.config.get("min_step_dwell_sec", 0.3)
                 if now - self.step_start_time >= min_dwell:
                     self._complete_current_step(now)
 
@@ -281,8 +288,8 @@ class SpatialEngine:
                     future_step_detected = True
                     self.skip_frames_counter += 1
                     
-                    # Tăng độ trễ cho bắt lỗi Skip (gấp 4 lần tolerance để tránh nhạy quá)
-                    tolerance = self.config.get("violation_tolerance", 3) * 4
+                    # Tăng tốc bắt lỗi Skip (giảm từ 4x xuống 1.5x)
+                    tolerance = self.config.get("violation_tolerance", 3) * 1.5
                     if self.skip_frames_counter >= tolerance:
                         logger.warning(f"[Cycle {self.cycle_count}] !!! [SKIP DETECTED] Step {self.current_step_idx+1} skipped. Direct to Step {i+1}")
                         self.is_failed = True
@@ -296,16 +303,19 @@ class SpatialEngine:
         return self._get_status_result(active_zones, "processing")
 
     def _log_spatial_debug(self, now, hands_data, active_zones):
-        """Ghi log chi tiết tọa độ và vùng ra file data/logs/spatial_debug.txt"""
-        log_path = "data/logs/spatial_debug.txt"
-        
-        # Tạo thư mục nếu chưa có
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        """Ghi log chi tiết tọa độ và vùng ra file data/logs/spatial_debug.txt
+        PRODUCTION: Chỉ ghi mỗi 1 giây để tiết kiệm I/O disk.
+        """
+        # Giới hạn tần suất ghi: tối đa 2 lần/giây (0.5s)
+        if hasattr(self, '_last_debug_log_time') and (now - self._last_debug_log_time) < 0.5:
+            return
+        self._last_debug_log_time = now
         
         # Chỉ log khi có tay
         if not hands_data:
             return
             
+        log_path = "data/logs/spatial_debug.txt"
         try:
             with open(log_path, "a", encoding="utf-8") as f:
                 time_str = time.strftime("%H:%M:%S", time.localtime(now)) + f".{int((now % 1) * 1000):03d}"
@@ -329,16 +339,8 @@ class SpatialEngine:
                         hands_detail.append(f"{side.upper()}: MISSING")
                 
                 log_line += " | ".join(hands_detail)
-                
-                # Nếu đang ở Step 7 hoặc 8, log thêm check restart
-                if self.current_step_idx >= 6:
-                    step_1_zone = self.sop_steps[0].get("required_zone")
-                    # Check thử xem có tay nào chạm mold không
-                    is_in_s1 = any(self._is_in_zone(s, step_1_zone, centroid_only=True) for s in ["left", "right"])
-                    log_line += f" | MOLD_HIT: {is_in_s1}"
-                
                 f.write(log_line + "\n")
-        except Exception as e:
+        except Exception:
             # Không để lỗi ghi log làm crash hệ thống
             pass
 
@@ -419,7 +421,9 @@ class SpatialEngine:
             base_res.update({
                 "detected_label": "VI PHẠM - QUAY LẠI BƯỚC 1",
                 "sop_status": status,
-                "violation_type": self.violation_type or "skip_step"
+                "violation_type": self.violation_type or "skip_step",
+                "step_index": 0,           # Reset về bước 1 trên UI để bỏ tích
+                "progress_percent": 0      # Reset thanh tiến trình
             })
             return base_res
 
@@ -437,7 +441,7 @@ class SpatialEngine:
         if logic == "zone_trigger":
             target = step.get("required_zone")
             mode = step.get("active_hand", "any")
-            grace = 2.0  # Tăng lên 2s để bù đắp thao tác nhanh
+            grace = 1.5  # Tăng lên 1.5s để thao tác mượt hơn
             
             if target not in self._zone_last_seen:
                 self._zone_last_seen[target] = {"left": 0, "right": 0}
@@ -448,24 +452,19 @@ class SpatialEngine:
                     if self._is_in_zone(side, target, centroid_only=centroid_only):
                         self._zone_last_seen[target][side] = now
             
-            # For skip-checks, we should probably check current frame OR a temporary local seen state
-            # but current frame (self._is_in_zone) is safest for skip detection.
-            # However, to maintain the 'grace' logic without side effects, we check CURRENTLY in zone.
-            is_left_in_now = any(h["label"].lower() == "left" and self._is_in_zone("left", target, centroid_only=centroid_only) for h in self.last_hands)
-            is_right_in_now = any(h["label"].lower() == "right" and self._is_in_zone("right", target, centroid_only=centroid_only) for h in self.last_hands)
-
             # Combine history (with grace) and current state
-            effective_left = (now - self._zone_last_seen[target]["left"] < grace) or is_left_in_now
-            effective_right = (now - self._zone_last_seen[target]["right"] < grace) or is_right_in_now
+            # FIX: Thêm điều kiện touch phải diễn ra SAU khi bước này bắt đầu (trừ đi 0.2s bù lag)
+            time_limit = self.step_start_time - 0.2
+            
+            effective_left = (self._zone_last_seen[target]["left"] > time_limit and now - self._zone_last_seen[target]["left"] < grace)
+            effective_right = (self._zone_last_seen[target]["right"] > time_limit and now - self._zone_last_seen[target]["right"] < grace)
             
             if mode == "both":
-                is_left_in = effective_left
-                is_right_in = effective_right
                 if update_status:
-                    if not is_left_in and not is_right_in: self.status_msg = f"Đợi cả 2 tay vào {target}"
-                    elif not is_left_in: self.status_msg = f"Đợi tay TRÁI vào {target}"
-                    elif not is_right_in: self.status_msg = f"Đợi tay PHẢI vào {target}"
-                return is_left_in and is_right_in
+                    if not effective_left and not effective_right: self.status_msg = f"Đợi cả 2 tay vào {target}"
+                    elif not effective_left: self.status_msg = f"Đợi tay TRÁI vào {target}"
+                    elif not effective_right: self.status_msg = f"Đợi tay PHẢI vào {target}"
+                return effective_left and effective_right
             
             if mode == "any":
                 return effective_left or effective_right

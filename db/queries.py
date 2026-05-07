@@ -106,16 +106,14 @@ class EventQueries:
 
     @staticmethod
     def get_violation_counts() -> Dict[str, int]:
-        """
-        Thống kê tổng số vi phạm theo loại.
-        """
+        """Thống kê tổng số vi phạm theo loại (tất cả thời gian)."""
         conn = db.get_connection()
         cursor = conn.cursor()
-
         try:
             cursor.execute(
                 "SELECT violation_type, COUNT(*) as cnt "
-                "FROM sop_events GROUP BY violation_type"
+                "FROM sop_events WHERE sop_status = 'violation' "
+                "GROUP BY violation_type"
             )
             rows = cursor.fetchall()
             return {row["violation_type"]: row["cnt"] for row in rows}
@@ -125,6 +123,104 @@ class EventQueries:
         finally:
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def get_daily_summary(target_date: str) -> Dict[str, Any]:
+        """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Đếm lỗi
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM sop_events 
+                WHERE DATE(timestamp) = %s AND sop_status = 'violation'
+            """, (target_date,))
+            violations = cursor.fetchone()["cnt"]
+
+            # Đếm số chu kỳ hoàn thành (để tính tỷ lệ tuân thủ)
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM sop_events 
+                WHERE DATE(timestamp) = %s AND sop_status = 'completed'
+            """, (target_date,))
+            completions = cursor.fetchone()["cnt"]
+
+            total_cycles = violations + completions
+            compliance = 100.0 if total_cycles == 0 else (completions / total_cycles) * 100.0
+
+            return {
+                "total_violations": violations,
+                "total_completions": completions,
+                "compliance_rate": round(compliance, 1)
+            }
+        except Exception as e:
+            logger.error(f"DB Error getting daily summary: {e}")
+            return {"total_violations": 0, "total_completions": 0, "compliance_rate": 100.0}
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def get_daily_distribution(target_date: str) -> Dict[str, int]:
+        """Phân bổ loại vi phạm trong một ngày cụ thể."""
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT violation_type, COUNT(*) as cnt 
+                FROM sop_events 
+                WHERE DATE(timestamp) = %s AND sop_status = 'violation'
+                GROUP BY violation_type
+            """, (target_date,))
+            rows = cursor.fetchall()
+            return {row["violation_type"]: row["cnt"] for row in rows}
+        except Exception as e:
+            logger.error(f"DB Error getting daily distribution: {e}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def get_weekly_trend(target_date: str) -> List[Dict[str, Any]]:
+        """Lấy xu hướng vi phạm 7 ngày (Thứ 2 -> Chủ Nhật) của tuần chứa target_date."""
+        import datetime
+        try:
+            dt = datetime.datetime.strptime(target_date, '%Y-%m-%d')
+            # Tìm Thứ 2 của tuần đó (ISO weekday: Mon=1, Sun=7; Python weekday: Mon=0, Sun=6)
+            start_of_week = dt - datetime.timedelta(days=dt.weekday())
+            end_of_week = start_of_week + datetime.timedelta(days=6)
+            
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            # Lấy dữ liệu gộp theo ngày
+            cursor.execute("""
+                SELECT DATE(timestamp) as date, COUNT(*) as cnt 
+                FROM sop_events 
+                WHERE DATE(timestamp) >= %s AND DATE(timestamp) <= %s AND sop_status = 'violation'
+                GROUP BY DATE(timestamp)
+            """, (start_of_week.strftime('%Y-%m-%d'), end_of_week.strftime('%Y-%m-%d')))
+            
+            db_data = {str(row["date"]): row["cnt"] for row in cursor.fetchall()}
+            
+            # Build đủ 7 ngày kể cả ngày không có dữ liệu
+            trend = []
+            days_vn = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            for i in range(7):
+                current_day = start_of_week + datetime.timedelta(days=i)
+                date_str = current_day.strftime('%Y-%m-%d')
+                trend.append({
+                    "day": days_vn[i],
+                    "date": date_str,
+                    "count": db_data.get(date_str, 0)
+                })
+            return trend
+        except Exception as e:
+            logger.error(f"DB Error getting weekly trend: {e}")
+            return []
+        finally:
+            if 'cursor' in locals(): cursor.close()
+            if 'conn' in locals(): conn.close()
 
     @staticmethod
     def get_events_by_camera(camera_id: str, limit: int = 50) -> List[Dict[str, Any]]:

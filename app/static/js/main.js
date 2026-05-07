@@ -30,7 +30,7 @@ async function initDashboard() {
     // 3. Sys Health Every 5s (Always update if elements exist)
     if (document.getElementById('cpu-val')) {
         updateSystemHealth();
-        setInterval(updateSystemHealth, 5000);
+        setInterval(updateSystemHealth, 15000);
     }
 }
 
@@ -202,13 +202,15 @@ socket.on('violation', (data) => {
         status.style.color = 'var(--danger)';
     }
 
-    // Hiển thị thông báo nổi (Toast)
-    showToast({
-        title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
-        body: `Phát hiện lỗi: ${vTypeVN}`,
-        details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
-        time: timestamp || new Date().toLocaleTimeString()
-    });
+    // Chỉ hiển thị thông báo nổi (Toast) nếu đang ở trang Dashboard (Trang chủ)
+    if (document.getElementById('camera-grid')) {
+        showToast({
+            title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
+            body: `Phát hiện lỗi: ${vTypeVN}`,
+            details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
+            time: timestamp || new Date().toLocaleTimeString()
+        });
+    }
 
     // Refresh list
     loadRecentEvents();

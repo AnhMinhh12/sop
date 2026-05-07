@@ -39,46 +39,44 @@ class HandDetector:
         return detections
 
     def _postprocess(self, result: Dict, orig_shape: tuple) -> List[Dict]:
-        """Hậu xử lý YOLOv11 - Bù trừ Letterbox để Box khớp hoàn toàn."""
-        output = np.squeeze(result["raw_output"][0]) 
+        """Hậu xử lý YOLOv11 - Tối ưu hóa bằng NumPy Vectorization."""
+        output = np.squeeze(result["raw_output"][0])
         output = output.T # (8400, 5) -> [cx, cy, w, h, conf]
         
+        # 1. Lọc theo ngưỡng confidence bằng NumPy (Nhanh hơn vòng lặp Python)
+        confidences = output[:, 4]
+        mask = confidences > self.conf_threshold
+        output = output[mask]
+        confidences = confidences[mask]
+
+        if len(output) == 0:
+            return []
+
         orig_h, orig_w = orig_shape
         ratio = result["ratio"]
         pad_left, pad_top = result["pad"]
 
-        boxes = []
-        confidences = []
+        # 2. Vectorized Box Conversion: (Tọa độ AI - Phần đệm lề) / Tỉ lệ thu phóng
+        # x_center = output[:, 0], y_center = output[:, 1], width = output[:, 2], height = output[:, 3]
+        x1 = (output[:, 0] - output[:, 2] / 2 - pad_left) / ratio
+        y1 = (output[:, 1] - output[:, 3] / 2 - pad_top) / ratio
+        w = output[:, 2] / ratio
+        h = output[:, 3] / ratio
 
-        for i in range(len(output)):
-            conf = output[i, 4]
-            if conf > self.conf_threshold:
-                cx, cy, w, h = output[i, :4]
-                
-                # CÔNG THỨC CHUẨN: (Tọa độ AI - Phần đệm lề) / Tỉ lệ thu phóng
-                x1 = (cx - w / 2 - pad_left) / ratio
-                y1 = (cy - h / 2 - pad_top) / ratio
-                bw = w / ratio
-                bh = h / ratio
+        # Chuyển thành list [x, y, w, h] cho NMS
+        boxes = np.stack([x1, y1, w, h], axis=1).astype(int).tolist()
+        conf_list = confidences.astype(float).tolist()
 
-                # Chỉ lấy các box nằm trong khung hình và có kích thước hợp lý
-                if bw > 2 and bh > 2:
-                    boxes.append([int(x1), int(y1), int(bw), int(bh)])
-                    confidences.append(float(conf))
-
-        if not boxes:
-            return []
-
-        # Non-Maximum Suppression
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, self.conf_threshold, self.iou_threshold)
+        # 3. Non-Maximum Suppression
+        indices = cv2.dnn.NMSBoxes(boxes, conf_list, self.conf_threshold, self.iou_threshold)
 
         final_detections = []
         if len(indices) > 0:
             for i in indices.flatten():
-                x, y, w, h = boxes[i]
+                box = boxes[i]
                 final_detections.append({
-                    "bbox": [x, y, x + w, y + h],
-                    "confidence": confidences[i]
+                    "bbox": [box[0], box[1], box[0] + box[2], box[1] + box[3]],
+                    "confidence": conf_list[i]
                 })
             
         return final_detections

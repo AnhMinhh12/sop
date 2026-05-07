@@ -54,13 +54,14 @@ class InferenceEngine:
             self.session = ort.InferenceSession(
                 model_path, sess_options, providers=['CPUExecutionProvider']
             )
-            # TỰ ĐỘNG LẤY KÍCH THƯỚC TỪ MODEL
+            # Lấy tên input và kích thước từ model
             input_info = self.session.get_inputs()[0]
             self.input_name = input_info.name
-            # Thường input là [1, 3, 640, 640]
-            self.input_size = input_info.shape[2] 
+            # Model ONNX có kích thước cố định (640x640) — phải dùng đúng kích thước này
+            if isinstance(input_info.shape[2], int):
+                self.input_size = input_info.shape[2]
             
-            logger.info(f"InferenceEngine: Model loaded. AUTO-DETECTED Input Size: {self.input_size}")
+            logger.info(f"InferenceEngine: Model loaded. Input Size: {self.input_size}")
         except Exception as e:
             logger.error(f"InferenceEngine: Failed to load model: {e}")
             self.session = None
@@ -97,6 +98,8 @@ class InferenceEngine:
     def _preprocess(self, frame: np.ndarray) -> tuple:
         """
         Resize with Letterbox (keep aspect ratio) and normalize.
+        Tối ưu: Dùng cv2.dnn.blobFromImage() để kết hợp resize+normalize+transpose
+        trong 1 lệnh C++ duy nhất (nhanh hơn làm từng bước bằng Python).
         Returns: (processed_img, ratio, (pad_left, pad_top))
         """
         shape = frame.shape[:2]  # height, width
@@ -116,13 +119,10 @@ class InferenceEngine:
         img = cv2.copyMakeBorder(img, top, bottom, left, right,
                                  cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
-        # Color space and normalize
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32) / 255.0
-        img = np.transpose(img, (2, 0, 1))
-        img = np.expand_dims(img, axis=0)
+        # Kết hợp BGR→RGB + normalize + HWC→CHW + thêm batch dim trong 1 lệnh tối ưu
+        blob = cv2.dnn.blobFromImage(img, scalefactor=1.0/255.0, swapRB=True)
 
-        return img, r, (left, top)
+        return blob, r, (left, top)
 
     def stop(self):
         """Cleanup (no background thread to stop in synchronous mode)."""

@@ -42,9 +42,23 @@ class StorageCleanup:
                 
                 # 2. Xóa theo dung lượng (Nếu ổ cứng đầy)
                 self._check_and_cleanup()
+
+                # 3. Xóa nội dung spatial_debug.txt (Mỗi 10p)
+                self._clear_debug_logs()
             except Exception as e:
                 logger.error(f"StorageCleanup: Error in worker: {e}")
             time.sleep(self.interval)
+
+    def _clear_debug_logs(self):
+        """Clears the content of spatial_debug.txt to save space."""
+        debug_file = "data/logs/spatial_debug.txt"
+        if os.path.exists(debug_file):
+            try:
+                with open(debug_file, "w", encoding="utf-8") as f:
+                    f.write(f"--- Cleared by StorageCleanup at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                logger.info("StorageCleanup: Cleared spatial_debug.txt")
+            except Exception as e:
+                logger.error(f"StorageCleanup: Could not clear {debug_file}: {e}")
 
     def _cleanup_by_time(self):
         """Deletes clips older than the retention period."""

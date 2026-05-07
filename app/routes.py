@@ -9,10 +9,10 @@ from services.disk_monitor import DiskMonitor
 from db.db import db
 from db.queries import EventQueries
 
-
+#xin chao
 @app.route('/')
 def index():
-    """Trang chủ dashboard."""
+    """Trang chủ dashboard SOP."""
     return render_template('index.html')
 
 
@@ -29,21 +29,29 @@ def stats():
 
 
 def gen_frames(camera_id: str):
-    """Máy phát luồng MJPEG cho trình duyệt."""
+    """Máy phát luồng MJPEG cho trình duyệt — Tối ưu CPU."""
+    last_frame_id = None
+    cached_bytes = None
+    
     while True:
         if camera_id in processors:
             frame = processors[camera_id].get_latest_frame()
             if frame is not None:
-                try:
-                    # Trả lại độ nét gốc cho người dùng
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                    frame_bytes = buffer.tobytes()
+                # Chỉ encode lại khi frame thực sự thay đổi (tránh encode lại cùng 1 frame)
+                frame_id = id(frame)
+                if frame_id != last_frame_id:
+                    try:
+                        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                        cached_bytes = buffer.tobytes()
+                        last_frame_id = frame_id
+                    except Exception:
+                        pass
+                
+                if cached_bytes:
                     yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                except Exception:
-                    pass
-        # Nghỉ lâu hơn một chút (~15 FPS) để CPU nhẹ gánh
-        time.sleep(0.07)
+                           b'Content-Type: image/jpeg\r\n\r\n' + cached_bytes + b'\r\n')
+        # Giảm xuống ~10 FPS — Mắt người không phân biệt 10 vs 15 FPS trên dashboard
+        time.sleep(0.1)
 
 
 @app.route('/video_feed/<camera_id>')
@@ -77,9 +85,30 @@ def get_events():
     return jsonify(events)
 
 
+@app.route('/api/stats/summary')
+def get_stat_summary():
+    target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
+    summary = EventQueries.get_daily_summary(target_date)
+    return jsonify(summary)
+
+
+@app.route('/api/stats/trend')
+def get_stat_trend():
+    target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
+    trend = EventQueries.get_weekly_trend(target_date)
+    return jsonify(trend)
+
+
+@app.route('/api/stats/distribution')
+def get_stat_distribution():
+    target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
+    dist = EventQueries.get_daily_distribution(target_date)
+    return jsonify(dist)
+
+
 @app.route('/api/stats/violations')
 def get_violation_stats():
-    """Thống kê vi phạm theo loại."""
+    """Thống kê vi phạm theo loại (Tổng tất cả)."""
     counts = EventQueries.get_violation_counts()
     return jsonify(counts)
 

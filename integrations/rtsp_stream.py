@@ -12,11 +12,14 @@ class RTSPStream:
     Manages an RTSP connection from an IP camera.
     Includes auto-reconnect logic and FPS capping.
     """
-    def __init__(self, camera_id: str, rtsp_url: str, fps_cap: int = 15):
+    def __init__(self, camera_id: str, rtsp_url: str, fps_cap: int = 15,
+                 target_width: int = 640, target_height: int = 480):
         self.camera_id = camera_id
         self.rtsp_url = rtsp_url
         self.fps_cap = fps_cap
         self.frame_delay = 1.0 / fps_cap
+        self.target_width = target_width
+        self.target_height = target_height
         
         self.cap: Optional[cv2.VideoCapture] = None
         self.frame: Optional[cv2.Mat] = None
@@ -41,7 +44,8 @@ class RTSPStream:
 
     def _update_loop(self):
         """Main loop to read frames and handle reconnections."""
-        print(f"RTSPStream [{self.camera_id}]: Thread loop started.", flush=True)
+        is_rtsp = self.rtsp_url.startswith(("rtsp://", "http://", "https://"))
+        
         while self.running:
             if self.cap is None or not self.cap.isOpened():
                 self._connect()
@@ -50,36 +54,33 @@ class RTSPStream:
                     time.sleep(5)
                     continue
 
-            # Flush buffer: Đọc bỏ các khung hình cũ để đảm bảo lấy khung hình MỚI NHẤT
-            # Đối với RTSP, việc này cực kỳ quan trọng để tránh trễ (latency)
-            if self.rtsp_url.startswith(("rtsp://", "http://", "https://")):
-                # Với RTSP thật: grab() nhanh để xả buffer
+            # Flush buffer: Xóa sạch bộ đệm để lấy khung hình mới nhất (Real-time)
+            if is_rtsp:
+                # Flush buffer liên tục cho đến khi hết frame cũ
+                # Đây là cách tốt nhất để triệt tiêu độ trễ trên RTSP Camera
                 while True:
                     grabbed = self.cap.grab()
                     if not grabbed: break
-                    # Chúng ta chỉ muốn khung hình cuối cùng, nên grab() liên tục 
-                    # cho đến khi không còn khung hình nào chờ sẵn
-                    if not self.cap.grab(): break 
             
             start_time = time.time()
             ret, frame = self.cap.read()
             
             if ret:
+                # RESIZE NGAY TẠI ĐÂY — Tránh lưu frame full-res vào bộ nhớ
+                # FrameProcessor sẽ nhận frame đã resize, không cần copy + resize lại
+                if frame.shape[1] != self.target_width or frame.shape[0] != self.target_height:
+                    frame = cv2.resize(frame, (self.target_width, self.target_height), 
+                                       interpolation=cv2.INTER_LINEAR)
+                
                 with self.lock:
                     self.frame = frame
                 self.status = "connected"
-                # Chỉ log mỗi 300 frame
-                if getattr(self, '_frame_count', 0) % 300 == 0:
-                    print(f"RTSPStream [{self.camera_id}]: Frame received successfully.", flush=True)
-                self._frame_count = getattr(self, '_frame_count', 0) + 1
             else:
                 # Nếu là file video quay sẵn thì tự động lặp lại (Loop)
-                if not self.rtsp_url.startswith(("rtsp://", "http://", "https://")):
-                    logger.debug(f"RTSPStream [{self.camera_id}]: Video file ended. Looping...")
+                if not is_rtsp:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
-                print(f"RTSPStream [{self.camera_id}]: Lost connection.", flush=True)
                 logger.warning(f"RTSPStream [{self.camera_id}]: Stream signal lost.")
                 self.status = "error"
                 self.cap.release()
@@ -91,8 +92,6 @@ class RTSPStream:
             
             if sleep_time > 0:
                 time.sleep(sleep_time)
-            # Đối với file video (.mp4), KHÔNG nhảy cóc khung hình để tránh mất sự kiện SOP quan trọng
-            # Đối với RTSP thực, logic while grab() ở trên đã xử lý xả buffer rồi.
 
     def _connect(self):
         """Attempts to open the RTSP or Video stream."""

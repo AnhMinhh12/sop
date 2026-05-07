@@ -7,33 +7,36 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
     <h2 class="section-title"><span>STATISTICS</span> Thống kê hiệu suất</h2>
+    <div class="date-filter">
+        <label for="target-date" style="font-weight: 600; color: #666; margin-right: 10px;">Chọn ngày:</label>
+        <input type="date" id="target-date" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd;">
+    </div>
 </div>
 
 <div class="stats-grid">
-    <!-- Thẻ tóm tắt -->
     <div class="widget stat-card">
-        <div class="widget-title">Tổng vi phạm</div>
-        <div class="stat-big-value" id="total-violations">--</div>
+        <div class="widget-title">Vi phạm trong ngày</div>
+        <div class="stat-big-value" id="total-violations">0</div>
     </div>
     <div class="widget stat-card">
         <div class="widget-title">Tỷ lệ tuân thủ</div>
-        <div class="stat-big-value" id="compliance-rate">--%</div>
+        <div class="stat-big-value" id="compliance-rate">100%</div>
     </div>
     <div class="widget stat-card">
-        <div class="widget-title">Trạm hoạt động</div>
-        <div class="stat-big-value" id="active-stations">--</div>
+        <div class="widget-title">Tổng chu kỳ hoàn thành</div>
+        <div class="stat-big-value" id="total-completions">0</div>
     </div>
 </div>
 
 <div class="charts-container">
     <div class="widget chart-box">
-        <div class="widget-title">Phân bổ loại vi phạm</div>
+        <div class="widget-title">Phân bổ loại vi phạm (Ngày chọn)</div>
         <canvas id="violationPieChart"></canvas>
     </div>
     <div class="widget chart-box">
-        <div class="widget-title">Xu hướng vi phạm (7 ngày)</div>
+        <div class="widget-title" id="trend-title">Xu hướng vi phạm (Tuần này)</div>
         <canvas id="violationLineChart"></canvas>
     </div>
 </div>
@@ -41,90 +44,128 @@
 
 {% block scripts %}
 <script>
+    let pieChart = null;
+    let lineChart = null;
+
     document.addEventListener('DOMContentLoaded', () => {
-        loadStats();
+        const dateInput = document.getElementById('target-date');
+        
+        // Mặc định là ngày hôm nay
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+
+        loadStats(today);
+
+        dateInput.addEventListener('change', (e) => {
+            loadStats(e.target.value);
+        });
     });
 
-    async function loadStats() {
+    async function loadStats(date) {
         try {
-            // 1. Lấy dữ liệu vi phạm
-            const response = await fetch('/api/stats/violations');
-            const data = await response.json();
+            // 1. Summary
+            const summaryRes = await fetch(`/api/stats/summary?date=${date}`);
+            const summary = await summaryRes.json();
             
-            const labels = Object.keys(data);
-            const values = Object.values(data);
-            const total = values.reduce((a, b) => a + b, 0);
-            
-            document.getElementById('total-violations').innerText = total;
-            
-            // Render Pie Chart
-            const ctxPie = document.getElementById('violationPieChart').getContext('2d');
-            new Chart(ctxPie, {
-                type: 'doughnut',
-                data: {
-                    labels: labels.map(l => {
-                        const map = {
-                            'skip_step': 'Bỏ bước',
-                            'timeout': 'Quá giờ',
-                            'wrong_step': 'Sai bước',
-                            'premature_restart': 'Reset sớm'
-                        };
-                        return map[l] || l;
-                    }),
-                    datasets: [{
-                        data: values,
-                        backgroundColor: [
-                            '#ef4444', '#f59e0b', '#6366f1', '#10b981', '#8b5cf6'
-                        ],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { position: 'bottom' }
-                    },
-                    cutout: '70%'
-                }
-            });
+            document.getElementById('total-violations').innerText = summary.total_violations;
+            document.getElementById('total-completions').innerText = summary.total_completions;
+            document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
 
-            // 2. Fetch cameras for active count
-            const camRes = await fetch('/api/cameras');
-            const cameras = await camRes.json();
-            document.getElementById('active-stations').innerText = cameras.length;
+            // 2. Distribution (Pie Chart)
+            const distRes = await fetch(`/api/stats/distribution?date=${date}`);
+            const distData = await distRes.json();
+            renderPieChart(distData);
 
-            // Mock compliance (Cần backend API thực tế để tính toán từ sessions)
-            document.getElementById('compliance-rate').innerText = '94.2%';
-
-            // Render Mock Line Chart
-            const ctxLine = document.getElementById('violationLineChart').getContext('2d');
-            new Chart(ctxLine, {
-                type: 'line',
-                data: {
-                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-                    datasets: [{
-                        label: 'Số lỗi',
-                        data: [12, 19, 3, 5, 2, 3, 7],
-                        borderColor: '#2d5cf7',
-                        backgroundColor: 'rgba(45, 92, 247, 0.1)',
-                        fill: true,
-                        tension: 0.4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, grid: { display: false } },
-                        x: { grid: { display: false } }
-                    }
-                }
-            });
+            // 3. Trend (Line Chart)
+            const trendRes = await fetch(`/api/stats/trend?date=${date}`);
+            const trendData = await trendRes.json();
+            renderLineChart(trendData);
 
         } catch (err) {
             console.error("Error loading stats:", err);
+        }
+    }
+
+    function renderPieChart(data) {
+        const ctx = document.getElementById('violationPieChart').getContext('2d');
+        const labels = Object.keys(data);
+        const values = Object.values(data);
+
+        const typeMap = {
+            'skip_step': 'Bỏ bước',
+            'timeout': 'Quá giờ',
+            'wrong_step': 'Sai bước',
+            'premature_restart': 'Reset sớm'
+        };
+
+        if (pieChart) pieChart.destroy();
+
+        if (labels.length === 0) {
+            // No data placeholder
+            pieChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Không có dữ liệu'],
+                    datasets: [{ data: [1], backgroundColor: ['#f3f4f6'] }]
+                },
+                options: { cutout: '70%', plugins: { legend: { display: false } } }
+            });
+            return;
+        }
+
+        pieChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels.map(l => typeMap[l] || l),
+                datasets: [{
+                    data: values,
+                    backgroundColor: ['#ef4444', '#f59e0b', '#6366f1', '#10b981', '#8b5cf6'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                cutout: '70%'
+            }
+        });
+    }
+
+    function renderLineChart(data) {
+        const ctx = document.getElementById('violationLineChart').getContext('2d');
+        const labels = data.map(d => d.day);
+        const values = data.map(d => d.count);
+
+        if (lineChart) lineChart.destroy();
+
+        lineChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Số lỗi',
+                    data: values,
+                    borderColor: '#2d5cf7',
+                    backgroundColor: 'rgba(45, 92, 247, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#2d5cf7'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+
+        // Update title to show range
+        if (data.length > 0) {
+            document.getElementById('trend-title').innerText = `Xu hướng tuần (${data[0].date} đến ${data[6].date})`;
         }
     }
 </script>

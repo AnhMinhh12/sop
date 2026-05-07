@@ -29,15 +29,11 @@ class Annotator:
             if isinstance(pts[0], list): # Nếu là Đa giác (Polygon)
                 poly_pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in pts], np.int32)
                 cv2.polylines(frame, [poly_pts], True, color, 2)
-                cv2.putText(frame, name, (poly_pts[0][0], poly_pts[0][1] - 5), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             else: # Nếu là Hình chữ nhật [x, y, w, h]
                 zx, zy, zw, zh = pts
                 p1 = (int(zx * w), int(zy * h))
                 p2 = (int((zx + zw) * w), int((zy + zh) * h))
                 cv2.rectangle(frame, p1, p2, color, 2)
-                cv2.putText(frame, name, (p1[0], p1[1] - 5), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
     @staticmethod
     def draw_keypoints(frame: np.ndarray, landmarks, label: str = "left") -> np.ndarray:

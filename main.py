@@ -15,8 +15,8 @@ if sys.stdout.encoding != 'utf-8':
 # --- TỐI ƯU HÓA TÀI NGUYÊN ---
 # Giới hạn OpenCV threads để không chiếm hết CPU cores
 cv2.setNumThreads(0)
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = os.getenv("OMP_NUM_THREADS", "1")
+os.environ["MKL_NUM_THREADS"] = os.getenv("MKL_NUM_THREADS", "1")
 os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
 
 from services.config_loader import ConfigLoader
@@ -40,7 +40,15 @@ os.makedirs(VIOLATIONS_DIR, exist_ok=True)
 # Cấu hình log chuyên nghiệp
 # Đảm bảo StreamHandler sử dụng sys.stdout đã được reconfigure
 console_handler = logging.StreamHandler(sys.stdout)
-file_handler = logging.FileHandler(os.getenv("LOG_FILE", "data/logs/system.log"), encoding='utf-8')
+console_handler.setLevel(logging.WARNING) # Chỉ hiện Warning/Error ra terminal cho gọn
+
+from logging.handlers import TimedRotatingFileHandler
+# Xoay vòng system.log mỗi 7 ngày (backupCount=1 để giữ lại 1 bản cũ nếu muốn, hoặc 0 để xóa luôn)
+file_handler = TimedRotatingFileHandler(
+    os.getenv("LOG_FILE", "data/logs/system.log"), 
+    when="D", interval=7, backupCount=1, encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +56,9 @@ logging.basicConfig(
     handlers=[file_handler, console_handler]
 )
 logger = logging.getLogger("Main")
+
+# Thông báo khởi động vẫn cho hiện ra console một lần
+print("=== HTMP SOP MONITORING SYSTEM IS STARTING... (Check logs for details) ===")
 
 
 def shutdown_handler(signum, frame):
@@ -79,8 +90,8 @@ def start_sop_monitoring():
     inference_cfg = config.get("inference", {})
     InferenceEngine(
         model_path=yolo_cfg["weights"],
-        num_threads=inference_cfg.get("num_threads", 4),
-        input_size=yolo_cfg["input_size"]
+        num_threads=int(os.getenv("AI_MAX_THREADS", inference_cfg.get("num_threads", 8))),
+        input_size=int(os.getenv("AI_INPUT_SIZE", yolo_cfg["input_size"]))
     )
 
     # 4. Khởi tạo các dịch vụ toàn hệ thống
@@ -94,7 +105,8 @@ def start_sop_monitoring():
     cleanup.start()
 
     logger.info("Main: Creating ClipSaver...")
-    clip_saver = ClipSaver(output_dir=os.getenv("VIOLATIONS_DIR", "data/violations"), fps=yolo_cfg.get("fps_cap", 15))
+    fps_cap = int(os.getenv("AI_FPS_CAP", yolo_cfg.get("fps_cap", 15)))
+    clip_saver = ClipSaver(output_dir=os.getenv("VIOLATIONS_DIR", "data/violations"), fps=fps_cap)
 
     logger.info("Main: Creating AudioAlert (Safe Mode)...")
     audio_alert = None

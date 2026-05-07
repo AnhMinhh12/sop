@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}SOP AI MONITORING - HTMP SYSTEMS{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Removed Google Fonts for Offline Environment -->
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
     {% block head %}{% endblock %}
 </head>
 <body>
@@ -16,6 +16,11 @@
         </div>
 
         <nav class="nav-tabs">
+            <a href="#" id="hub-link" class="nav-link" style="background: rgba(255,255,255,0.1); border-radius: 4px; margin-right: 15px;">⬅ Hub</a>
+            <script>
+                // Tự động nhận diện IP để quay về Hub cổng 4000
+                document.getElementById('hub-link').href = "http://" + window.location.hostname + ":4000/";
+            </script>
             <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Dashboard</a>
             <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">Lịch sử</a>
             <a href="/stats" class="nav-link {% if request.path == '/stats' %}active{% endif %}">Thống kê</a>
