@@ -74,6 +74,17 @@ function renderOverviewGrid(cameras) {
             <div class="overview-info">
                 <div class="overview-header">
                     <span class="overview-name">${cam.name}</span>
+                    <div class="settings-container">
+                        <button class="settings-btn" onclick="event.preventDefault(); toggleProductDropdown('${cam.id}')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="2" y1="14" x2="6" y2="14"></line><line x1="10" y1="8" x2="14" y2="8"></line><line x1="18" y1="16" x2="22" y2="16"></line></svg>
+                        </button>
+                        <div id="dropdown-${cam.id}" class="product-dropdown">
+                            <div class="dropdown-header">Chọn mã hàng</div>
+                            <div id="product-list-${cam.id}" class="dropdown-body">
+                                <!-- Loading... -->
+                            </div>
+                        </div>
+                    </div>
                     <span id="cycle-count-${cam.id}" class="cycle-badge">Cycle: 0</span>
                 </div>
                 <div id="step-name-${cam.id}" class="overview-step">Ready</div>
@@ -108,7 +119,20 @@ function renderStationDetail(cam) {
                         <span class="station-name">${cam.name}</span>
                         <div id="status-${cam.id}" class="status-indicator">INITIALIZING</div>
                     </div>
-                    <div id="cycle-count-${cam.id}" class="cycle-badge">Cycle: 0</div>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <div class="settings-container">
+                            <button class="settings-btn" onclick="toggleProductDropdown('${cam.id}')" title="Cấu hình mã sản phẩm">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="2" y1="14" x2="6" y2="14"></line><line x1="10" y1="8" x2="14" y2="8"></line><line x1="18" y1="16" x2="22" y2="16"></line></svg>
+                            </button>
+                            <div id="dropdown-${cam.id}" class="product-dropdown" style="top: 100%; right: 0;">
+                                <div class="dropdown-header">Chọn mã hàng</div>
+                                <div id="product-list-${cam.id}" class="dropdown-body">
+                                    <!-- Loading... -->
+                                </div>
+                            </div>
+                        </div>
+                        <div id="cycle-count-${cam.id}" class="cycle-badge">Cycle: 0</div>
+                    </div>
                 </div>
                 
                 <div class="progress-container">
@@ -386,4 +410,80 @@ async function updateSystemHealth() {
         document.getElementById('ram-val').innerText = `${data.ram_used_mb} MB`;
         document.getElementById('disk-val').innerText = `${data.disk_free_gb} GB Free`;
     } catch (err) {}
+}
+
+async function toggleProductDropdown(cameraId) {
+    const dropdown = document.getElementById(`dropdown-${cameraId}`);
+    const listContainer = document.getElementById(`product-list-${cameraId}`);
+    
+    // Đóng các dropdown khác đang mở
+    document.querySelectorAll('.product-dropdown').forEach(d => {
+        if (d.id !== `dropdown-${cameraId}`) d.style.display = 'none';
+    });
+
+    if (dropdown.style.display === 'block') {
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    dropdown.style.display = 'block';
+    listContainer.innerHTML = '<div style="text-align:center; padding:10px; color:#94a3b8; font-size:0.7rem;">Đang tải...</div>';
+    
+    try {
+        const response = await fetch('/api/products');
+        const products = await response.json();
+        
+        if (products.length === 0) {
+            listContainer.innerHTML = '<div style="padding:10px; font-size:0.7rem;">Trống</div>';
+            return;
+        }
+        
+        listContainer.innerHTML = products.map(p => `
+            <div class="product-option" onclick="selectProduct('${cameraId}', '${p.id}')">
+                <span class="opt-id">${p.id}</span>
+                <span class="opt-name">${p.name}</span>
+            </div>
+        `).join('');
+    } catch (err) {
+        listContainer.innerHTML = `<div style="color:var(--danger); font-size:0.7rem;">Lỗi</div>`;
+    }
+}
+
+// Close dropdowns when clicking outside
+window.addEventListener('click', (e) => {
+    if (!e.target.closest('.settings-container')) {
+        document.querySelectorAll('.product-dropdown').forEach(d => d.style.display = 'none');
+    }
+});
+
+async function selectProduct(cameraId, productId) {
+    if (!confirm(`Chuyển sang mã hàng: ${productId}?`)) return;
+    
+    try {
+        const response = await fetch(`/api/station/${cameraId}/switch_product`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: productId })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            showToast({
+                title: "CẬP NHẬT THÀNH CÔNG",
+                body: `Đã đổi sang mã: ${productId}`,
+                details: "Hệ thống đang nạp lại logic...",
+                time: new Date().toLocaleTimeString()
+            });
+            // Reset UI
+            if (document.getElementById(`step-list-${cameraId}`)) {
+                document.getElementById(`step-list-${cameraId}`).innerHTML = '';
+            }
+        } else {
+            alert("Lỗi: " + result.error);
+        }
+    } catch (err) {
+        alert("Lỗi kết nối: " + err);
+    }
+    
+    document.querySelectorAll('.product-dropdown').forEach(d => d.style.display = 'none');
 }

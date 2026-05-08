@@ -4,6 +4,14 @@ server:
   debug: false
   secret_key: "default-secret-key-change-me"
 
+products:
+  - id: "sku_assembly_v1"
+    name: "Lắp ráp Piston V1"
+    sop_file: "config/sop_definitions/station_01.yaml"
+  - id: "sku_check_jig_v2"
+    name: "Kiểm tra Jig V2"
+    sop_file: "config/sop_definitions/station_02.yaml" # Example
+
 inference:
   device: "cpu"
   model_format: "onnx"
@@ -31,6 +39,7 @@ cameras:
     rtsp_url: "D:/Apps/SOP_HTMP/random.mp4"
     #rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
     sop_file: "config/sop_definitions/station_01.yaml"
+    engine_id: "sku_assembly_v1"
     resolution: [640, 480]
     fps_cap: 15
 

@@ -46,3 +46,15 @@ class ConfigLoader:
         except Exception as e:
             logger.error(f"Failed to load SOP definition for {station_id}: {e}")
             return {"station_id": station_id, "steps": []}
+
+    @staticmethod
+    def load_yaml(path: str) -> Dict[str, Any]:
+        """Loads a generic YAML file by path."""
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load YAML at {path}: {e}")
+            return {}

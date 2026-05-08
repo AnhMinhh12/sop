@@ -7,7 +7,7 @@ from app import app, processors
 from services.config_loader import ConfigLoader
 from services.disk_monitor import DiskMonitor
 from db.db import db
-from db.queries import EventQueries
+from db.queries import EventQueries, CameraQueries, DefinitionQueries
 
 #xin chao
 @app.route('/')
@@ -151,3 +151,48 @@ def get_clip_by_id(event_id):
 def serve_violation_file(filename):
     """Serve trực tiếp file từ thư mục violations."""
     return send_from_directory(os.path.abspath("data/violations"), filename)
+@app.route('/api/products')
+def get_products():
+    """Lấy danh sách mã sản phẩm từ config."""
+    config = ConfigLoader.load_config()
+    return jsonify(config.get("products", []))
+
+
+@app.route('/api/station/<camera_id>/switch_product', methods=['POST'])
+def switch_product(camera_id):
+    """Chuyển đổi mã sản phẩm cho 1 trạm cụ thể."""
+    data = request.json
+    product_id = data.get('product_id')
+    
+    if camera_id not in processors:
+        return jsonify({"success": False, "error": "Camera not found"}), 404
+        
+    config = ConfigLoader.load_config()
+    # Tìm thông tin sản phẩm trong config
+    product = next((p for p in config.get("products", []) if p['id'] == product_id), None)
+    
+    if not product:
+        return jsonify({"success": False, "error": "Product not found in config"}), 400
+        
+    # Load SOP definition cho mã hàng này
+    # Giả sử sop_file trong config là đường dẫn tương đối từ project root
+    sop_def = ConfigLoader.load_yaml(product['sop_file'])
+    if not sop_def:
+        return jsonify({"success": False, "error": "Failed to load SOP definition"}), 500
+        
+    # 1. Chuyển đổi Engine thực tế (Real-time logic)
+    success = processors[camera_id].switch_engine(product_id, sop_def)
+    
+    if success:
+        # 2. Cập nhật Database để Dashboard (History/Stats) biết về mã hàng mới
+        # Upsert định nghĩa và sync các bước
+        def_name = f"{product['name']} (Auto)"
+        def_id = DefinitionQueries.upsert_definition(def_name, total_steps=len(sop_def.get("steps", [])))
+        if def_id:
+            DefinitionQueries.sync_steps(def_id, sop_def.get("steps", []))
+            # Cập nhật liên kết camera - định nghĩa mới
+            CameraQueries.update_camera_definition(camera_id, def_id)
+            
+        return jsonify({"success": True, "message": f"Switched to {product['name']}"})
+    else:
+        return jsonify({"success": False, "error": "Engine failed to switch"}), 500

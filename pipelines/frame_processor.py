@@ -10,7 +10,8 @@ from typing import Dict, Any, Optional
 from integrations.rtsp_stream import RTSPStream
 from integrations.hand_detector import HandDetector
 from pipelines.frame_buffer import FrameRingBuffer
-from core.spatial_engine import SpatialEngine
+from core.engines.base_engine import BaseEngine
+from core.engines.loader import EngineLoader
 from core.violation_detector import ViolationDetector
 from services.annotator import Annotator
 from events.audio_alert import AudioAlert
@@ -31,7 +32,7 @@ class FrameProcessor:
     Reform: Uses SpatialEngine (Zone-based) instead of LSTM.
     """
     def __init__(self, camera_config: Dict[str, Any],
-                 spatial_engine: SpatialEngine,
+                 engine: BaseEngine,
                  violation_detector: ViolationDetector,
                  audio_alert: Optional[AudioAlert],
                  clip_saver: ClipSaver):
@@ -52,8 +53,8 @@ class FrameProcessor:
         self.hand_detector = HandDetector(self.cam_id, confidence_threshold=0.15)
         # BỎ MediaPipe KeypointExtractor
 
-        # New Engine
-        self.spatial_engine = spatial_engine
+        # Dynamic Engine
+        self.engine = engine
         self.violation_detector = violation_detector
         
         self.ring_buffer = FrameRingBuffer(self.fps, 10)  # 5s trước + 5s sau = 10s tổng
@@ -129,8 +130,8 @@ class FrameProcessor:
                 hands_data = new_hands_data
                 self._cached_hands = hands_data
 
-            # 3. Spatial Logic Update
-            self.latest_status = self.spatial_engine.update(hands_data)
+            # 3. Dynamic Engine Update
+            self.latest_status = self.engine.update(hands_data)
             
             # 4. Check Violation
             violation = self.violation_detector.analyze(self.latest_status)
@@ -140,7 +141,9 @@ class FrameProcessor:
             # 5. Annotation — TỐI ƯU: Vẽ trực tiếp lên frame đã lấy từ stream (đã là 1 bản copy)
             # Việc này giúp giảm 1 lần copy ảnh mỗi frame và giúp clip vi phạm có sẵn Bbox để đối soát.
             display_frame = frame 
-            Annotator.draw_zones(display_frame, self.spatial_engine.zones)
+            # Note: Annotator.draw_zones might need access to current engine's zones
+            if hasattr(self.engine, 'zones'):
+                Annotator.draw_zones(display_frame, self.engine.zones)
             for h in self._cached_hands:
                 bbox = h["bbox"]
                 color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
@@ -211,6 +214,27 @@ class FrameProcessor:
             )
         threading.Thread(target=background_task, daemon=True).start()
 
+
+    def switch_engine(self, product_id: str, sop_config: Dict[str, Any]):
+        """Thay đổi engine logic của trạm sang một mã sản phẩm khác."""
+        logger.info(f"FrameProcessor [{self.cam_id}]: Switching to product engine '{product_id}'...")
+        try:
+            new_engine = EngineLoader.create_engine(product_id, sop_config)
+            
+            # Tạm thời khóa để đổi engine
+            old_engine = self.engine
+            self.engine = new_engine
+            
+            # Reset trạng thái
+            self.engine.reset()
+            self._completion_logged = False
+            self.latest_status = {"sop_status": "idle", "progress_percent": 0}
+            
+            logger.info(f"FrameProcessor [{self.cam_id}]: Successfully switched to '{product_id}'.")
+            return True
+        except Exception as e:
+            logger.error(f"FrameProcessor [{self.cam_id}]: Failed to switch engine: {e}")
+            return False
 
     def get_latest_frame(self): return self.current_processed_frame
     def stop(self):

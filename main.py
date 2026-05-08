@@ -23,7 +23,7 @@ from services.config_loader import ConfigLoader
 from services.disk_monitor import DiskMonitor
 from pipelines.inference_engine import InferenceEngine
 from pipelines.frame_processor import FrameProcessor
-from core.spatial_engine import SpatialEngine
+from core.engines.loader import EngineLoader
 from core.violation_detector import ViolationDetector
 from events.audio_alert import AudioAlert
 from events.clip_saver import ClipSaver
@@ -136,15 +136,22 @@ def start_sop_monitoring():
             DefinitionQueries.sync_steps(def_id, sop_def.get("steps", []))
             CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], def_id)
         
-        # New Reformed Engine
-        spatial_engine = SpatialEngine(sop_def)
+        # Load Engine Logic cho mã sản phẩm này
+        engine_id = cam_cfg.get("engine_id")
+        if not engine_id:
+            logger.error(f"Main: No engine_id defined for {cam_id}. Skipping.")
+            continue
+            
+        logger.info(f"Main: Loading engine '{engine_id}' for {cam_id}...")
+        engine = EngineLoader.create_engine(engine_id, sop_def)
+        
         violation_detector = ViolationDetector(cam_id)
 
         # Tạo Processor trung tâm
         logger.info(f"Main: Building Reformed FrameProcessor for {cam_id}...")
         processor = FrameProcessor(
             camera_config=cam_cfg,
-            spatial_engine=spatial_engine,
+            engine=engine,
             violation_detector=violation_detector,
             audio_alert=audio_alert,
             clip_saver=clip_saver
