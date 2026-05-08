@@ -286,6 +286,13 @@ header {
 }
 
 /* Grid System */
+.camera-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+}
+
 .camera-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
@@ -293,7 +300,13 @@ header {
     margin-bottom: 3rem;
 }
 
-/* Station Card - NGANG */
+/* Station Card - NGANG (Dùng cho trang chi tiết) */
+.station-detail-container {
+    display: block;
+    width: 100%;
+    margin-bottom: 2rem;
+}
+
 .station-card {
     background: var(--card-bg);
     border-radius: 28px;
@@ -303,7 +316,92 @@ header {
     box-shadow: var(--shadow);
     display: flex; /* Đổi sang flex để xếp ngang */
     flex-direction: row;
-    min-height: 400px;
+    min-height: 450px;
+}
+
+/* Overview Card - GỌN (Dùng cho trang tổng hợp) */
+.overview-card {
+    background: var(--card-bg);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+}
+
+.overview-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 30px rgba(0,0,0,0.1);
+    border-color: var(--primary);
+}
+
+.overview-header-icon {
+    position: relative;
+    width: 100%;
+    height: 80px;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.station-icon {
+    font-size: 2rem;
+    opacity: 0.5;
+}
+
+.overview-card .status-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #64748b;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.overview-info {
+    padding: 1.5rem;
+}
+
+.overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.overview-name {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.overview-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.overview-step {
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-weight: 600;
+    margin-top: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .station-card:hover {
@@ -352,6 +450,91 @@ header {
     background: #fafbfc;
 }
 
+/* --- PREMIUM STATION HEADER --- */
+.station-header-premium {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2rem;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    position: relative;
+    overflow: hidden;
+}
+
+.station-header-premium::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--primary);
+}
+
+.header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.view-badge {
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: var(--primary);
+    background: rgba(37, 99, 235, 0.08);
+    padding: 4px 12px;
+    border-radius: 100px;
+    width: fit-content;
+    text-transform: uppercase;
+}
+
+.premium-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #1e293b;
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+}
+
+.back-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 22px;
+    background: #1e293b;
+    color: white;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(30, 41, 59, 0.2);
+}
+
+.back-link:hover {
+    background: #0f172a;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(30, 41, 59, 0.3);
+}
+
+.back-link svg {
+    transition: transform 0.3s ease;
+}
+
+.back-link:hover svg {
+    transform: scale(1.15);
+}
+
 .station-name {
     font-size: 0.8rem;
     color: var(--text-muted);
@@ -372,7 +555,7 @@ header {
     border: 1px solid rgba(45, 92, 247, 0.2);
 }
 
-.progress-container {
+.progress-container, .progress-bar-container {
     margin-top: 1.5rem;
 }
 

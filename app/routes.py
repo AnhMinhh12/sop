@@ -12,8 +12,14 @@ from db.queries import EventQueries
 #xin chao
 @app.route('/')
 def index():
-    """Trang chủ dashboard SOP."""
+    """Trang chủ dashboard SOP (Tổng hợp)."""
     return render_template('index.html')
+
+
+@app.route('/station/<camera_id>')
+def station(camera_id):
+    """Trang chi tiết từng trạm camera."""
+    return render_template('station.html', camera_id=camera_id)
 
 
 @app.route('/history')
@@ -88,21 +94,24 @@ def get_events():
 @app.route('/api/stats/summary')
 def get_stat_summary():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
-    summary = EventQueries.get_daily_summary(target_date)
+    camera_id = request.args.get('camera_id')
+    summary = EventQueries.get_daily_summary(target_date, camera_id=camera_id)
     return jsonify(summary)
 
 
 @app.route('/api/stats/trend')
 def get_stat_trend():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
-    trend = EventQueries.get_weekly_trend(target_date)
+    camera_id = request.args.get('camera_id')
+    trend = EventQueries.get_weekly_trend(target_date, camera_id=camera_id)
     return jsonify(trend)
 
 
 @app.route('/api/stats/distribution')
 def get_stat_distribution():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
-    dist = EventQueries.get_daily_distribution(target_date)
+    camera_id = request.args.get('camera_id')
+    dist = EventQueries.get_daily_distribution(target_date, camera_id=camera_id)
     return jsonify(dist)
 
 

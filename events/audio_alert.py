@@ -20,12 +20,26 @@ class AudioAlert:
         self.last_alert_time = 0
         self.lock = threading.Lock()
         
+        # Check for available audio output devices
+        self.device_available = False
+        try:
+            devices = sd.query_devices()
+            if any(d['max_output_channels'] > 0 for d in devices):
+                self.device_available = True
+            else:
+                logger.warning("AudioAlert: No audio output device found. Audio alerts will be disabled.")
+        except Exception as e:
+            logger.warning(f"AudioAlert: Could not query audio devices: {e}. Audio alerts will be disabled.")
+
         # Load sound data once
         try:
-            self.data, self.fs = sf.read(sound_file)
-            # Apply volume
-            self.data = self.data * volume
-            logger.info(f"AudioAlert: Loaded alert sound from {sound_file}")
+            if self.device_available:
+                self.data, self.fs = sf.read(sound_file)
+                # Apply volume
+                self.data = self.data * volume
+                logger.info(f"AudioAlert: Loaded alert sound from {sound_file}")
+            else:
+                self.data = None
         except Exception as e:
             logger.error(f"AudioAlert: Failed to load sound file: {e}")
             self.data = None

@@ -125,23 +125,32 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_summary(target_date: str) -> Dict[str, Any]:
+    def get_daily_summary(target_date: str, camera_id: Optional[str] = None) -> Dict[str, Any]:
         """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
+            where_clause = "WHERE DATE(e.timestamp) = %s"
+            params = [target_date]
+            
+            if camera_id:
+                where_clause += " AND c.station_id = %s"
+                params.append(camera_id)
+
             # Đếm lỗi
-            cursor.execute("""
-                SELECT COUNT(*) as cnt FROM sop_events 
-                WHERE DATE(timestamp) = %s AND sop_status = 'violation'
-            """, (target_date,))
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {where_clause} AND e.sop_status = 'violation'
+            """, tuple(params))
             violations = cursor.fetchone()["cnt"]
 
-            # Đếm số chu kỳ hoàn thành (để tính tỷ lệ tuân thủ)
-            cursor.execute("""
-                SELECT COUNT(*) as cnt FROM sop_events 
-                WHERE DATE(timestamp) = %s AND sop_status = 'completed'
-            """, (target_date,))
+            # Đếm số chu kỳ hoàn thành
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {where_clause} AND e.sop_status = 'completed'
+            """, tuple(params))
             completions = cursor.fetchone()["cnt"]
 
             total_cycles = violations + completions
@@ -160,17 +169,25 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_distribution(target_date: str) -> Dict[str, int]:
+    def get_daily_distribution(target_date: str, camera_id: Optional[str] = None) -> Dict[str, int]:
         """Phân bổ loại vi phạm trong một ngày cụ thể."""
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("""
-                SELECT violation_type, COUNT(*) as cnt 
-                FROM sop_events 
-                WHERE DATE(timestamp) = %s AND sop_status = 'violation'
-                GROUP BY violation_type
-            """, (target_date,))
+            where_clause = "WHERE DATE(e.timestamp) = %s AND e.sop_status = 'violation'"
+            params = [target_date]
+            
+            if camera_id:
+                where_clause += " AND c.station_id = %s"
+                params.append(camera_id)
+
+            cursor.execute(f"""
+                SELECT e.violation_type, COUNT(*) as cnt 
+                FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {where_clause}
+                GROUP BY e.violation_type
+            """, tuple(params))
             rows = cursor.fetchall()
             return {row["violation_type"]: row["cnt"] for row in rows}
         except Exception as e:
@@ -181,25 +198,32 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_weekly_trend(target_date: str) -> List[Dict[str, Any]]:
+    def get_weekly_trend(target_date: str, camera_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Lấy xu hướng vi phạm 7 ngày (Thứ 2 -> Chủ Nhật) của tuần chứa target_date."""
         import datetime
         try:
             dt = datetime.datetime.strptime(target_date, '%Y-%m-%d')
-            # Tìm Thứ 2 của tuần đó (ISO weekday: Mon=1, Sun=7; Python weekday: Mon=0, Sun=6)
             start_of_week = dt - datetime.timedelta(days=dt.weekday())
             end_of_week = start_of_week + datetime.timedelta(days=6)
             
             conn = db.get_connection()
             cursor = conn.cursor()
             
+            where_clause = "WHERE DATE(e.timestamp) >= %s AND DATE(e.timestamp) <= %s AND e.sop_status = 'violation'"
+            params = [start_of_week.strftime('%Y-%m-%d'), end_of_week.strftime('%Y-%m-%d')]
+            
+            if camera_id:
+                where_clause += " AND c.station_id = %s"
+                params.append(camera_id)
+
             # Lấy dữ liệu gộp theo ngày
-            cursor.execute("""
-                SELECT DATE(timestamp) as date, COUNT(*) as cnt 
-                FROM sop_events 
-                WHERE DATE(timestamp) >= %s AND DATE(timestamp) <= %s AND sop_status = 'violation'
-                GROUP BY DATE(timestamp)
-            """, (start_of_week.strftime('%Y-%m-%d'), end_of_week.strftime('%Y-%m-%d')))
+            cursor.execute(f"""
+                SELECT DATE(e.timestamp) as date, COUNT(*) as cnt 
+                FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {where_clause}
+                GROUP BY DATE(e.timestamp)
+            """, tuple(params))
             
             db_data = {str(row["date"]): row["cnt"] for row in cursor.fetchall()}
             

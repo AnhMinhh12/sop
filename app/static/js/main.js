@@ -10,39 +10,91 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initDashboard() {
     console.log("Checking page context...");
     
-    // 1. Load Cameras if on Dashboard
+    // 1. Load Cameras
     const grid = document.getElementById('camera-grid');
-    if (grid) {
+    const stationContainer = document.getElementById('station-container');
+
+    if (grid || stationContainer) {
         try {
             const response = await fetch('/api/cameras');
             const cameras = await response.json();
-            renderCameraGrid(cameras);
+            
+            if (grid) {
+                renderOverviewGrid(cameras);
+            } else if (stationContainer) {
+                const cameraId = stationContainer.getAttribute('data-camera-id');
+                const camera = cameras.find(c => c.id === cameraId);
+                if (camera) {
+                    renderStationDetail(camera);
+                } else {
+                    stationContainer.innerHTML = `<div class="error">Station ${cameraId} not found</div>`;
+                }
+            }
         } catch (err) {
             console.error("Failed to load cameras:", err);
         }
     }
 
-    // 2. Load Initial Events if on Dashboard
+    // 2. Load Initial Events
     if (document.getElementById('event-list')) {
-        loadRecentEvents();
+        const cameraId = stationContainer ? stationContainer.getAttribute('data-camera-id') : null;
+        loadRecentEvents(cameraId);
     }
 
-    // 3. Sys Health Every 5s (Always update if elements exist)
+    // 3. Update Nav Links if on Station Page
+    if (stationContainer) {
+        const cameraId = stationContainer.getAttribute('data-camera-id');
+        const historyLink = document.querySelector('a[href="/history"]');
+        const statsLink = document.querySelector('a[href="/stats"]');
+        if (historyLink) historyLink.href = `/history?camera_id=${cameraId}`;
+        if (statsLink) statsLink.href = `/stats?camera_id=${cameraId}`;
+    }
+
+    // 4. Sys Health Every 15s
     if (document.getElementById('cpu-val')) {
         updateSystemHealth();
         setInterval(updateSystemHealth, 15000);
     }
 }
 
-function renderCameraGrid(cameras) {
+function renderOverviewGrid(cameras) {
     const grid = document.getElementById('camera-grid');
     grid.innerHTML = '';
 
     cameras.forEach(cam => {
-        const card = document.createElement('div');
-        card.className = 'station-card';
-        card.id = `station-${cam.id}`;
+        const card = document.createElement('a');
+        card.className = 'overview-card';
+        card.href = `/station/${cam.id}`;
+        card.id = `overview-${cam.id}`;
         card.innerHTML = `
+            <div class="overview-header-icon" id="header-icon-${cam.id}">
+                <div class="station-icon">📸</div>
+                <div class="status-badge" id="status-badge-${cam.id}">INIT</div>
+            </div>
+            <div class="overview-info">
+                <div class="overview-header">
+                    <span class="overview-name">${cam.name}</span>
+                    <span id="cycle-count-${cam.id}" class="cycle-badge">Cycle: 0</span>
+                </div>
+                <div id="step-name-${cam.id}" class="overview-step">Ready</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="height: 6px;">
+                        <div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function renderStationDetail(cam) {
+    const container = document.getElementById('station-container');
+    const title = document.getElementById('station-detail-title');
+    if (title) title.innerText = cam.name;
+
+    container.innerHTML = `
+        <div class="station-card" id="station-${cam.id}">
             <div class="video-wrapper">
                 <img class="video-feed" src="/video_feed/${cam.id}" alt="Stream">
                 <div class="bimanual-status">
@@ -74,15 +126,13 @@ function renderCameraGrid(cameras) {
                         Sẵn sàng
                     </div>
 
-                    <!-- DANH SÁCH CÁC BƯỚC SOP -->
                     <div id="step-list-${cam.id}" class="sop-steps-list">
                         <!-- Sẽ được fill bằng JS -->
                     </div>
                 </div>
             </div>
-        `;
-        grid.appendChild(card);
-    });
+        </div>
+    `;
 }
 
 // Real-time Updates via SocketIO
@@ -119,6 +169,19 @@ socket.on('step_update', (data) => {
             }
         } else {
             status.style.color = '#888';
+        }
+    }
+
+    // Update status badge on overview card if it exists
+    const overviewBadge = document.getElementById(`status-badge-${camera_id}`);
+    if (overviewBadge) {
+        overviewBadge.innerText = sop_status.toUpperCase();
+        if (sop_status === 'violation') {
+            overviewBadge.style.background = 'var(--danger)';
+        } else if (sop_status === 'correct' || sop_status === 'completed') {
+            overviewBadge.style.background = 'var(--success)';
+        } else {
+            overviewBadge.style.background = '#64748b';
         }
     }
 
@@ -202,18 +265,26 @@ socket.on('violation', (data) => {
         status.style.color = 'var(--danger)';
     }
 
-    // Chỉ hiển thị thông báo nổi (Toast) nếu đang ở trang Dashboard (Trang chủ)
-    if (document.getElementById('camera-grid')) {
-        showToast({
-            title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
-            body: `Phát hiện lỗi: ${vTypeVN}`,
-            details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
-            time: timestamp || new Date().toLocaleTimeString()
-        });
+    // HIỂN THỊ TOAST (Thông báo nổi)
+    // Luật: 
+    // 1. Ở trang chính (Overview): KHÔNG hiện toast để tránh làm phiền (đã có hiệu ứng rung và đổi màu ở card).
+    // 2. Ở trang chi tiết (Station): CHỈ hiện toast nếu lỗi thuộc về camera đang xem.
+    const stationContainer = document.getElementById('station-container');
+    if (stationContainer) {
+        const currentCameraId = stationContainer.getAttribute('data-camera-id');
+        if (camera_id === currentCameraId) {
+            showToast({
+                title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
+                body: `Phát hiện lỗi: ${vTypeVN}`,
+                details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
+                time: timestamp || new Date().toLocaleTimeString()
+            });
+        }
     }
 
     // Refresh list
-    loadRecentEvents();
+    const cameraIdFilter = stationContainer ? stationContainer.getAttribute('data-camera-id') : null;
+    loadRecentEvents(cameraIdFilter);
 });
 
 function showToast({ title, body, details, time }) {
@@ -238,12 +309,17 @@ function showToast({ title, body, details, time }) {
     }, 8000);
 }
 
-async function loadRecentEvents() {
+async function loadRecentEvents(cameraId = null) {
     try {
         const list = document.getElementById('event-list');
         if (!list) return;
 
-        const response = await fetch('/api/events?limit=10');
+        let url = '/api/events?limit=10';
+        if (cameraId) {
+            url += `&camera_id=${cameraId}`;
+        }
+        
+        const response = await fetch(url);
         const events = await response.json();
         list.innerHTML = '';
 

@@ -46,25 +46,36 @@
 <script>
     let pieChart = null;
     let lineChart = null;
+    let currentCameraId = null;
 
     document.addEventListener('DOMContentLoaded', () => {
         const dateInput = document.getElementById('target-date');
+        const urlParams = new URLSearchParams(window.location.search);
+        currentCameraId = urlParams.get('camera_id');
+
+        if (currentCameraId) {
+            const title = document.querySelector('.section-title');
+            if (title) title.innerHTML += ` <span style="font-size:1.2rem; color:var(--primary); background:none;">(Trạm: ${currentCameraId})</span>`;
+        }
         
-        // Mặc định là ngày hôm nay
         const today = new Date().toISOString().split('T')[0];
         dateInput.value = today;
 
-        loadStats(today);
+        loadStats(today, currentCameraId);
 
         dateInput.addEventListener('change', (e) => {
-            loadStats(e.target.value);
+            loadStats(e.target.value, currentCameraId);
         });
     });
 
-    async function loadStats(date) {
+    async function loadStats(date, cameraId = null) {
         try {
+            let baseUrl = `/api/stats`;
+            let filter = `date=${date}`;
+            if (cameraId) filter += `&camera_id=${cameraId}`;
+
             // 1. Summary
-            const summaryRes = await fetch(`/api/stats/summary?date=${date}`);
+            const summaryRes = await fetch(`${baseUrl}/summary?${filter}`);
             const summary = await summaryRes.json();
             
             document.getElementById('total-violations').innerText = summary.total_violations;
@@ -72,12 +83,12 @@
             document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
 
             // 2. Distribution (Pie Chart)
-            const distRes = await fetch(`/api/stats/distribution?date=${date}`);
+            const distRes = await fetch(`${baseUrl}/distribution?${filter}`);
             const distData = await distRes.json();
             renderPieChart(distData);
 
             // 3. Trend (Line Chart)
-            const trendRes = await fetch(`/api/stats/trend?date=${date}`);
+            const trendRes = await fetch(`${baseUrl}/trend?${filter}`);
             const trendData = await trendRes.json();
             renderLineChart(trendData);
 

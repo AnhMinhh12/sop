@@ -47,11 +47,14 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', () => {
-        loadFilterOptions();
-        loadHistory();
+        const urlParams = new URLSearchParams(window.location.search);
+        const cameraId = urlParams.get('camera_id');
+        
+        loadFilterOptions(cameraId);
+        loadHistory(cameraId);
     });
 
-    async function loadFilterOptions() {
+    async function loadFilterOptions(selectedId = '') {
         const response = await fetch('/api/cameras');
         const cameras = await response.json();
         const select = document.getElementById('filter-station');
@@ -59,6 +62,7 @@
             const opt = document.createElement('option');
             opt.value = cam.station_id;
             opt.textContent = cam.name;
+            if (cam.station_id === selectedId) opt.selected = true;
             select.appendChild(opt);
         });
     }

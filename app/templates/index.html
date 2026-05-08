@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div class="page-header">
+    <div class="section-title">
+        <span>Overview</span>
+        <h2>Multi-Camera Dashboard</h2>
+    </div>
+    <div class="system-summary-pills">
+        <!-- Optional summary stats -->
+    </div>
+</div>
+
 <!-- Lưới Camera chính -->
-<div id="camera-grid" class="camera-grid">
+<div id="camera-grid" class="camera-overview-grid">
     <!-- Loading placeholder -->
     <div style="padding: 50px; text-align: center; color: #555;">Initializing cameras...</div>
 </div>
-
 {% endblock %}
 
 

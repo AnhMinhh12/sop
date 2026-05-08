@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Station Detail - {{ camera_id }}{% endblock %}
+
+{% block content %}
+
+<div id="station-container" class="station-detail-container" data-camera-id="{{ camera_id }}">
+    <!-- Card will be rendered here by JS -->
+    <div style="padding: 50px; text-align: center; color: #555;">Initializing station...</div>
+</div>
+
+{% endblock %}
