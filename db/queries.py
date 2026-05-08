@@ -354,6 +354,24 @@ class CameraQueries:
             cursor.close()
             conn.close()
 
+    @staticmethod
+    def update_camera_definition(station_id: str, definition_id: int) -> None:
+        """Cập nhật liên kết giữa camera và định nghĩa SOP mới."""
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE sop_cameras SET definition_id = %s WHERE station_id = %s",
+                (definition_id, station_id)
+            )
+            conn.commit()
+            logger.info(f"DB: Updated camera '{station_id}' with definition_id={definition_id}")
+        except Exception as e:
+            logger.error(f"DB Error updating camera definition: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class DefinitionQueries:
     """

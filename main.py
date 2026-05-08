@@ -126,8 +126,12 @@ def start_sop_monitoring():
         logger.info(f"Main: Starting station {station_id} setup...")
 
         # Load SOP (Phiên bản ZONES mới)
-        clean_sid = station_id.replace("station_", "")
-        sop_def = ConfigLoader.load_sop_definition(clean_sid)
+        sop_file = cam_cfg.get("sop_file")
+        if sop_file:
+            sop_def = ConfigLoader.load_yaml(sop_file)
+        else:
+            clean_sid = station_id.replace("station_", "")
+            sop_def = ConfigLoader.load_sop_definition(clean_sid)
         
         # --- ĐỒNG BỘ MYSQL: Lưu quy trình và camera vào DB để dashboard sử dụng ---
         def_name = sop_def.get("station_name", f"SOP {station_id}")

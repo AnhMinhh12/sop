@@ -298,6 +298,7 @@ socket.on('violation', (data) => {
         const currentCameraId = stationContainer.getAttribute('data-camera-id');
         if (camera_id === currentCameraId) {
             showToast({
+                type: 'danger',
                 title: `CẢNH BÁO VI PHẠM - ${camera_id.toUpperCase()}`,
                 body: `Phát hiện lỗi: ${vTypeVN}`,
                 details: `Cần thực hiện: "${expected_step || 'N/A'}"<br>Nhưng thấy: "${detected_step || 'Không xác định'}"`,
@@ -311,13 +312,21 @@ socket.on('violation', (data) => {
     loadRecentEvents(cameraIdFilter);
 });
 
-function showToast({ title, body, details, time }) {
+function showToast({ type = 'success', title, body, details, time }) {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
-    toast.className = 'toast';
+    toast.className = `toast ${type}`;
+    
+    const icons = {
+        'success': '✅',
+        'danger': '⚠️',
+        'warning': '🔔'
+    };
+    const icon = icons[type] || '🔔';
+
     toast.innerHTML = `
         <div class="toast-header">
-            <div class="toast-title">⚠️ ${title}</div>
+            <div class="toast-title">${icon} ${title}</div>
             <div class="toast-time">${time}</div>
         </div>
         <div class="toast-body">${body}</div>
@@ -439,7 +448,7 @@ async function toggleProductDropdown(cameraId) {
         }
         
         listContainer.innerHTML = products.map(p => `
-            <div class="product-option" onclick="selectProduct('${cameraId}', '${p.id}')">
+            <div class="product-option" onclick="selectProduct('${cameraId}', '${p.id}', '${p.name}')">
                 <span class="opt-id">${p.id}</span>
                 <span class="opt-name">${p.name}</span>
             </div>
@@ -456,8 +465,8 @@ window.addEventListener('click', (e) => {
     }
 });
 
-async function selectProduct(cameraId, productId) {
-    if (!confirm(`Chuyển sang mã hàng: ${productId}?`)) return;
+async function selectProduct(cameraId, productId, productName) {
+    if (!confirm(`Chuyển sang mã hàng: ${productName}?`)) return;
     
     try {
         const response = await fetch(`/api/station/${cameraId}/switch_product`, {
@@ -469,9 +478,10 @@ async function selectProduct(cameraId, productId) {
         const result = await response.json();
         if (result.success) {
             showToast({
+                type: 'success',
                 title: "CẬP NHẬT THÀNH CÔNG",
-                body: `Đã đổi sang mã: ${productId}`,
-                details: "Hệ thống đang nạp lại logic...",
+                body: `Đã đổi sang: ${productName}`,
+                details: `Mã kỹ thuật: ${productId}`,
                 time: new Date().toLocaleTimeString()
             });
             // Reset UI

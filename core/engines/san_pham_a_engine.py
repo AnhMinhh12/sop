@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class ProductEngine(BaseEngine):
     """
-    Engine logic cho mã sản phẩm SKU_ASSEMBLY_V1.
+    Engine logic cho mã sản phẩm SAN_PHAM_A.
     Thực hiện logic không gian dựa trên vùng (Zones).
     """
     def __init__(self, sop_config: Dict[str, Any]):
@@ -18,6 +18,7 @@ class ProductEngine(BaseEngine):
         self.zones = sop_config.get("zones", {})
         self.sop_steps = sop_config.get("steps", [])
         self.config = sop_config.get("config", {"w": 640, "h": 480})
+        self.product_id = "san_pham_a" # ID này nên được truyền từ loader
         
         # Sắp xếp vùng theo diện tích để ưu tiên vùng nhỏ
         self.sorted_zones = []
@@ -59,7 +60,8 @@ class ProductEngine(BaseEngine):
         self.reset_dwell_start = 0.0
         self.cycle_count = 0
         
-        logger.info(f"ProductEngine [SKU_ASSEMBLY_V1]: Initialized for station {self.station_id}")
+        logger.info(f"ProductEngine [SAN_PHAM_A]: Initialized for station {self.station_id}")
+        self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
     def update(self, hands_data: List[Dict]) -> Dict[str, Any]:
         now = time.time()
@@ -99,6 +101,7 @@ class ProductEngine(BaseEngine):
             
             active_zones[side] = current_zone
             if current_zone != self.hand_states[side]["zone"]:
+                self.log_debug(f"Hand {side.upper()} changed zone: {self.hand_states[side]['zone']} -> {current_zone}", self.product_id)
                 self.hand_states[side]["zone"] = current_zone
                 self.hand_states[side]["entry_time"] = now
 
@@ -143,6 +146,7 @@ class ProductEngine(BaseEngine):
                     self.step_start_time = now
                     self._complete_current_step(now)
                     self.last_completed_time = now
+                    self.log_debug(f"CYCLE STARTED (Cycle {self.cycle_count})", self.product_id)
                 else:
                     self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
@@ -153,6 +157,7 @@ class ProductEngine(BaseEngine):
                 self.is_failed = True
                 self.violation_type = "timeout"
                 self.failed_step_idx = self.current_step_idx
+                self.log_debug(f"VIOLATION: Timeout at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             if self._check_step_logic(current_step, now):
@@ -176,6 +181,7 @@ class ProductEngine(BaseEngine):
                             if is_in_s1:
                                 self.is_failed = True
                                 self.failed_step_idx = self.current_step_idx
+                                self.log_debug(f"VIOLATION: Premature Restart detected at step {self.current_step_idx}", self.product_id)
                                 return self._get_status_result(active_zones, "violation", violation_type="premature_restart")
 
             # Check Skip
@@ -195,6 +201,7 @@ class ProductEngine(BaseEngine):
                         if self.skip_frames_counter >= tolerance:
                             self.is_failed = True
                             self.failed_step_idx = self.current_step_idx
+                            self.log_debug(f"VIOLATION: Skip Step detected. Future step {i} ({future_step['step_name']}) seen while at step {self.current_step_idx}", self.product_id)
                             return self._get_status_result(active_zones, "violation", violation_type="skip_step")
                         break 
                 if not future_step_detected:
@@ -220,6 +227,7 @@ class ProductEngine(BaseEngine):
         self.last_completed_zone = None
         self.last_completed_time = time.time()
         self.reset_dwell_start = 0
+        self.log_debug("ENGINE RESET", self.product_id)
 
     def get_status(self) -> Dict[str, Any]:
         return self._get_status_result({"left": None, "right": None}, "idle")
@@ -227,6 +235,7 @@ class ProductEngine(BaseEngine):
     # --- Internal Helpers ---
     def _complete_current_step(self, now: float):
         step = self.sop_steps[self.current_step_idx]
+        self.log_debug(f"STEP COMPLETED: {self.current_step_idx + 1}/{len(self.sop_steps)} - {step['step_name']}", self.product_id)
         self.last_completed_zone = step.get("required_zone")
         self.last_completed_time = now
         self.current_step_idx += 1
@@ -234,7 +243,15 @@ class ProductEngine(BaseEngine):
         self.hit_count = 0
         self.last_trigger_states = {}
         self._stay_timer = {}
-        self._zone_last_seen = {}
+        # Xóa lịch sử vùng của bước tiếp theo để tránh kích hoạt tức thì
+        if self.current_step_idx < len(self.sop_steps):
+            next_step = self.sop_steps[self.current_step_idx]
+            next_zones = self._get_all_zones_for_step(next_step)
+            for nz in next_zones:
+                if nz in self._zone_last_seen:
+                    self._zone_last_seen[nz] = {"left": 0, "right": 0}
+        
+        self._zone_last_seen = {} # Reset toàn bộ cho chắc chắn
         if self.current_step_idx >= len(self.sop_steps):
             self._completed_at = now
 
@@ -288,7 +305,7 @@ class ProductEngine(BaseEngine):
             if update_status:
                 for side in ["left", "right"]:
                     if self._is_in_zone(side, target, centroid_only=centroid_only): self._zone_last_seen[target][side] = now
-            time_limit = self.step_start_time - 0.2
+            time_limit = self.step_start_time
             effective_left = (self._zone_last_seen[target]["left"] > time_limit and now - self._zone_last_seen[target]["left"] < grace)
             effective_right = (self._zone_last_seen[target]["right"] > time_limit and now - self._zone_last_seen[target]["right"] < grace)
             if mode == "both": return effective_left and effective_right

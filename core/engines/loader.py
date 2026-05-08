@@ -16,10 +16,10 @@ class EngineLoader:
     def get_engine_class(product_id: str) -> Type[BaseEngine]:
         """
         Nạp file Python tương ứng với product_id và trả về class engine.
-        File phải được đặt trong core/engines/<product_id>.py
+        File phải được đặt trong core/engines/<product_id>_engine.py
         Class bên trong phải được đặt tên là 'ProductEngine'
         """
-        module_path = f"core.engines.{product_id}"
+        module_path = f"core.engines.{product_id}_engine"
         
         try:
             # Import động module
