@@ -1,9 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Monitoring Hub - HTMP Systems</title>
+
+    <!-- Localized Dependencies -->
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <style>
+        @font-face {
+            font-family: 'SystemSans';
+            src: local('Inter'), local('Segoe UI'), local('Roboto'), local('Helvetica Neue'), Arial, sans-serif;
+        }
+    </style>
+
     <style>
         :root {
             --bg-body: #f1f5f9;
@@ -165,12 +176,7 @@
             align-items: center;
             justify-content: center;
             border-bottom: 1px solid var(--border);
-        }
-
-        .card-preview img {
-            max-width: 80%;
-            max-height: 80%;
-            opacity: 0.8;
+            overflow: hidden;
         }
 
         .status-badge {
@@ -275,18 +281,21 @@
         .progress-container {
             margin-bottom: 20px;
         }
+
         .progress-label {
             display: flex;
             justify-content: space-between;
             font-size: 0.75rem;
             margin-bottom: 8px;
         }
+
         .progress-bar {
             height: 8px;
             background-color: #e2e8f0;
             border-radius: 4px;
             overflow: hidden;
         }
+
         .progress-fill {
             height: 100%;
             background-color: var(--primary);
@@ -304,13 +313,20 @@
             justify-content: center;
             color: var(--primary);
         }
-
     </style>
 </head>
+
 <body>
     <header>
         <div class="logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                </path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
             AI Monitoring Hub
         </div>
 
@@ -320,56 +336,61 @@
         </div>
 
         <div class="header-actions">
-            <div class="icon-btn">🔔</div>
-            <div class="icon-btn">❓</div>
-            <div class="icon-btn">⚙️</div>
-            <div class="user-avatar"></div>
+            <!-- Đã xóa các icon theo yêu cầu -->
         </div>
     </header>
 
     <main>
         <div class="page-header">
-            <h1>Project Directory</h1>
-            <p>Manage and monitor active AI vision models deployed across facilities.</p>
+            <h1>Danh mục dự án</h1>
+            <p>Quản lý và giám sát các camera AI đang hoạt động.</p>
         </div>
 
         <div class="project-grid">
             <!-- Card 1: Presence Check -->
             <div class="card">
                 <div class="card-preview">
-                    <div class="status-badge active"><span class="status-dot"></span>Active</div>
-                    <div class="icon-box">👤</div>
+                    <img src="{{ url_for('static', filename='illustration/check_person.jpg') }}" 
+                         class="absolute inset-0 w-full h-full object-cover" alt="Presence Check">
+                    <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>
                 <div class="card-content">
                     <h3>Kiểm tra người đứng máy</h3>
-                    <p>Giám sát sự hiện diện của nhân sự tại trạm làm việc, cảnh báo khi vắng mặt quá thời gian quy định.</p>
-                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5000/'" class="btn-view">View Details</a>
+                    <p>Giám sát sự hiện diện của nhân sự tại trạm làm việc, cảnh báo khi vắng mặt quá thời gian quy
+                        định.</p>
+                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5000/'"
+                        class="btn-view">View Details</a>
                 </div>
             </div>
 
             <!-- Card 2: SOP Monitoring -->
             <div class="card">
                 <div class="card-preview">
-                    <div class="status-badge active"><span class="status-dot"></span>Active</div>
-                    <div class="icon-box">📊</div>
+                    <img src="{{ url_for('static', filename='illustration/sop.jpg') }}" 
+                         class="absolute inset-0 w-full h-full object-cover" alt="SOP Monitoring">
+                    <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>
                 <div class="card-content">
                     <h3>Kiểm tra thao tác công nhân</h3>
-                    <p>Phân tích và đối chiếu các bước thực hiện của công nhân với quy trình chuẩn (SOP) thời gian thực.</p>
-                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5001/'" class="btn-view">View Details</a>
+                    <p>Phân tích và đối chiếu các bước thực hiện của công nhân với quy trình chuẩn (SOP) thời gian thực.
+                    </p>
+                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5001/'"
+                        class="btn-view">View Details</a>
                 </div>
             </div>
 
             <!-- Card 3: Defect Detection -->
             <div class="card">
                 <div class="card-preview">
-                    <div class="status-badge testing" style="background-color: #eff6ff; color: #1d4ed8;"><span class="status-dot"></span>Testing</div>
+                    <div class="status-badge testing" style="background-color: #eff6ff; color: #1d4ed8;"><span
+                            class="status-dot"></span>Testing</div>
                     <div class="icon-box" style="color: #1d4ed8; background-color: rgba(29, 78, 216, 0.1);">🔍</div>
                 </div>
                 <div class="card-content">
                     <h3>Nhận diện lỗi sản phẩm</h3>
                     <p>Tự động phát hiện các lỗi bề mặt, thiếu linh kiện trên sản phẩm bằng model YOLO chuyên dụng.</p>
-                    <button class="btn-view" disabled style="opacity: 0.6; cursor: not-allowed;">Under Development</button>
+                    <button class="btn-view" disabled style="opacity: 0.6; cursor: not-allowed;">Under
+                        Development</button>
                 </div>
             </div>
 
@@ -381,7 +402,8 @@
                 </div>
                 <div class="card-content">
                     <h3>Giám sát an toàn</h3>
-                    <p>Cảnh báo khi nhân sự không trang bị bảo hộ lao động (mũ, áo, găng tay) trong khu vực nguy hiểm.</p>
+                    <p>Cảnh báo khi nhân sự không trang bị bảo hộ lao động (mũ, áo, găng tay) trong khu vực nguy hiểm.
+                    </p>
                     <button class="btn-view" disabled style="opacity: 0.6; cursor: not-allowed;">Configuring...</button>
                 </div>
             </div>
@@ -396,4 +418,5 @@
         }
     </script>
 </body>
+
 </html>
