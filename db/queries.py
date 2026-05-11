@@ -14,6 +14,27 @@ class EventQueries:
     """
 
     @staticmethod
+    def _log_to_file(message: str):
+        """Helper to log DB operations to a debug file. Clears after 24 hours."""
+        log_dir = "data/logs"
+        if not os.path.exists(log_dir): os.makedirs(log_dir)
+        log_path = os.path.join(log_dir, "db_debug.txt")
+        
+        # Tự động xóa nếu file cũ hơn 1 ngày (86400 giây)
+        mode = 'a'
+        if os.path.exists(log_path):
+            mtime = os.path.getmtime(log_path)
+            if time.time() - mtime > 86400:
+                mode = 'w' # Ghi đè (xóa cũ)
+        
+        ts = time.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            with open(log_path, mode, encoding='utf-8') as f:
+                f.write(f"[{ts}] {message}\n")
+        except:
+            pass # Tránh làm crash app chính nếu lỗi file log
+
+    @staticmethod
     def log_event(camera_id: str, violation_type: str,
                   step_detected: Optional[str] = None,
                   expected_step: Optional[str] = None,
@@ -33,13 +54,14 @@ class EventQueries:
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
 
         try:
-            # Tìm camera_id (INT) từ station_id (TEXT)
+            # Tìm camera_id (INT) và definition_id (Mã hàng hiện tại) từ station_id
             cursor.execute(
-                "SELECT id FROM sop_cameras WHERE station_id = %s",
+                "SELECT id, definition_id FROM sop_cameras WHERE station_id = %s",
                 (camera_id,)
             )
             cam_row = cursor.fetchone()
             cam_db_id = cam_row["id"] if cam_row else None
+            def_db_id = cam_row["definition_id"] if cam_row else None
 
             if cam_db_id is None:
                 logger.warning(
@@ -49,12 +71,12 @@ class EventQueries:
 
             cursor.execute("""
                 INSERT INTO sop_events (
-                    camera_id, timestamp, violation_type,
+                    camera_id, definition_id, timestamp, violation_type,
                     step_detected, expected_step, sop_status,
                     confidence, clip_path
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                cam_db_id, timestamp, violation_type,
+                cam_db_id, def_db_id, timestamp, violation_type,
                 step_detected or "N/A", expected_step,
                 sop_status, confidence, clip_path
             ))
@@ -74,9 +96,11 @@ class EventQueries:
                 f"DB: Logged violation '{violation_type}' for camera "
                 f"{camera_id} (event_id={event_id}, clip_saved={bool(clip_path)})"
             )
+            EventQueries._log_to_file(f"LOG_EVENT: Cam:{camera_id} (DBID:{cam_db_id}), Type:{violation_type}, Status:{sop_status}, ID:{event_id}")
             return event_id
 
         except Exception as e:
+            EventQueries._log_to_file(f"LOG_EVENT_ERROR: {e}")
             logger.error(f"DB Error logging event: {e}")
             return None
         finally:
@@ -127,6 +151,10 @@ class EventQueries:
     @staticmethod
     def get_daily_summary(target_date: str, camera_id: Optional[str] = None) -> Dict[str, Any]:
         """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
+        # Bảo vệ: Nếu JS gửi chuỗi "undefined", coi như là None
+        if camera_id == "undefined" or not camera_id:
+            camera_id = None
+            
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
@@ -156,12 +184,15 @@ class EventQueries:
             total_cycles = violations + completions
             compliance = 100.0 if total_cycles == 0 else (completions / total_cycles) * 100.0
 
-            return {
+            res = {
                 "total_violations": violations,
                 "total_completions": completions,
                 "compliance_rate": round(compliance, 1)
             }
+            EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id} -> {res}")
+            return res
         except Exception as e:
+            EventQueries._log_to_file(f"GET_SUMMARY_ERROR: {e}")
             logger.error(f"DB Error getting daily summary: {e}")
             return {"total_violations": 0, "total_completions": 0, "compliance_rate": 100.0}
         finally:
@@ -171,6 +202,9 @@ class EventQueries:
     @staticmethod
     def get_daily_distribution(target_date: str, camera_id: Optional[str] = None) -> Dict[str, int]:
         """Phân bổ loại vi phạm trong một ngày cụ thể."""
+        if camera_id == "undefined" or not camera_id:
+            camera_id = None
+            
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
@@ -200,6 +234,9 @@ class EventQueries:
     @staticmethod
     def get_weekly_trend(target_date: str, camera_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Lấy xu hướng vi phạm 7 ngày (Thứ 2 -> Chủ Nhật) của tuần chứa target_date."""
+        if camera_id == "undefined" or not camera_id:
+            camera_id = None
+            
         import datetime
         try:
             dt = datetime.datetime.strptime(target_date, '%Y-%m-%d')

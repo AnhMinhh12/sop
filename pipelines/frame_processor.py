@@ -67,6 +67,7 @@ class FrameProcessor:
         self.latest_status = {"sop_status": "idle", "progress_percent": 0}
         self._loop_count = 0
         self._cached_hands = []
+        self._last_hands_update_time = 0.0
         self.thread = None
 
     def start(self):
@@ -129,6 +130,14 @@ class FrameProcessor:
                 
                 hands_data = new_hands_data
                 self._cached_hands = hands_data
+                self._last_hands_update_time = loop_start
+
+            # --- TAY MA (GHOST HANDS) PROTECTION ---
+            # Nếu AI không chạy hoặc detector liên tục không thấy tay trong 0.3s, xóa cache.
+            # Điều này ngăn việc engine nhận diện nhầm khi công nhân đã rút tay ra nhưng AI chưa update.
+            if loop_start - self._last_hands_update_time > 0.3:
+                self._cached_hands = []
+                hands_data = []
 
             # 3. Dynamic Engine Update
             self.latest_status = self.engine.update(hands_data)

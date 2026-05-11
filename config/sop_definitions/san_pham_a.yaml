@@ -13,9 +13,10 @@ zones:
 steps:
   - step_order: 1
     step_name: "Lấy 2 SP từ khuôn"
-    logic: "zone_trigger"
-    active_hand: "both"
+    logic: "multi_trigger"
+    active_hand: "any"
     required_zone: "mold"
+    required_count: 2
 
   - step_order: 2
     step_name: "Đặt SP vào bàn bên trái"
@@ -25,9 +26,10 @@ steps:
 
   - step_order: 3
     step_name: "Lấy 2 Slider từ khuôn"
-    logic: "zone_trigger"
-    active_hand: "both"
+    logic: "multi_trigger"
+    active_hand: "any"
     required_zone: "mold"
+    required_count: 2
 
   - step_order: 4
     step_name: "Đặt Slider vào bàn giữa"
@@ -75,3 +77,4 @@ config:
   idle_timeout_frames: 120
   transition_timeout_sec: 15.0
   min_step_dwell_sec: 0.8
+  restart_allowed_until_step: 1 # Chỉ cần xong bước 1 là bắt đầu kiểm tra lỗi quay lại (Restart)

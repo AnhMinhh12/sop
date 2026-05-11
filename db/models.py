@@ -63,6 +63,7 @@ class SOPEvent:
     id: int = 0
     session_id: Optional[int] = None
     camera_id: int = 0
+    definition_id: Optional[int] = None
     timestamp: Optional[datetime] = None
     step_detected: str = ""
     confidence: Optional[float] = None

@@ -122,6 +122,7 @@ class Database:
                     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
                     session_id      INT DEFAULT NULL,
                     camera_id       INT NOT NULL,
+                    definition_id   INT DEFAULT NULL,
                     timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,
                     step_detected   VARCHAR(255) NOT NULL,
                     confidence      FLOAT DEFAULT NULL,
@@ -130,9 +131,20 @@ class Database:
                     expected_step   VARCHAR(255) DEFAULT NULL,
                     clip_path       TEXT DEFAULT NULL,
                     FOREIGN KEY (session_id) REFERENCES sop_sessions(id) ON DELETE SET NULL,
-                    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE
+                    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE,
+                    FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+
+            # MỚI: Migration tự động thêm cột definition_id nếu bảng đã tồn tại từ bản cũ
+            try:
+                cursor.execute("SHOW COLUMNS FROM sop_events LIKE 'definition_id'")
+                if not cursor.fetchone():
+                    logger.info("Database: Migrating sop_events - adding definition_id column...")
+                    cursor.execute("ALTER TABLE sop_events ADD COLUMN definition_id INT DEFAULT NULL AFTER camera_id")
+                    cursor.execute("ALTER TABLE sop_events ADD CONSTRAINT fk_event_definition FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE SET NULL")
+            except Exception as e:
+                logger.warning(f"Database: Migration notice (sop_events): {e}")
 
             # 6. sop_clips — Clip video vi phạm
             cursor.execute("""

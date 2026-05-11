@@ -19,6 +19,7 @@ class ProductEngine(BaseEngine):
         self.sop_steps = sop_config.get("steps", [])
         self.config = sop_config.get("config", {"w": 640, "h": 480})
         self.product_id = "san_pham_a" # ID này nên được truyền từ loader
+        self.restart_threshold = self.config.get("restart_allowed_until_step", len(self.sop_steps) // 2)
         
         # Sắp xếp vùng theo diện tích để ưu tiên vùng nhỏ
         self.sorted_zones = []
@@ -125,10 +126,9 @@ class ProductEngine(BaseEngine):
             if self._check_step_logic(step_1, now):
                 if self.reset_dwell_start == 0:
                     self.reset_dwell_start = now
-                elif now - self.reset_dwell_start >= 0.5:
+                elif now - self.reset_dwell_start >= 0.3:
                     self.reset(now=now)
                     self.cycle_count += 1
-                    self._complete_current_step(now)
                     self.waiting_for_start = False 
             else:
                 self.reset_dwell_start = 0.0
@@ -144,7 +144,6 @@ class ProductEngine(BaseEngine):
                     self.waiting_for_start = False
                     self.cycle_count += 1
                     self.step_start_time = now
-                    self._complete_current_step(now)
                     self.last_completed_time = now
                     self.log_debug(f"CYCLE STARTED (Cycle {self.cycle_count})", self.product_id)
                 else:
@@ -172,10 +171,18 @@ class ProductEngine(BaseEngine):
                 self.status_msg = f"Đang chờ: {current_step['step_name']}"
                 
                 # Check Premature Restart
-                if self.current_step_idx > (len(self.sop_steps) // 2):
+                # Chỉ báo lỗi nếu đã vượt qua ngưỡng cho phép quay lại (restart_threshold)
+                if self.current_step_idx >= self.restart_threshold:
                     step_1 = self.sop_steps[0]
                     s1_zone = step_1.get("required_zone")
-                    if s1_zone not in current_zones:
+                    
+                    # CẢI TIẾN: Nếu vùng bước 1 trùng với vùng của bước hiện tại HOẶC bất kỳ bước tương lai nào, 
+                    # thì ưu tiên coi đó là hành động đi tiếp, không báo lỗi Restart.
+                    all_future_zones = []
+                    for i in range(self.current_step_idx, len(self.sop_steps)):
+                        all_future_zones.extend(self._get_all_zones_for_step(self.sop_steps[i]))
+                    
+                    if s1_zone not in all_future_zones:
                         if not (s1_zone == self.last_completed_zone and (now - self.last_completed_time < 5.0)):
                             is_in_s1 = any(self._is_in_zone(side, s1_zone, centroid_only=True) for side in ["left", "right"])
                             if is_in_s1:
@@ -194,11 +201,18 @@ class ProductEngine(BaseEngine):
                     if self.last_completed_zone in future_zones and (now - self.last_completed_time < 3.0): continue 
                     if self.last_completed_zone and any(self._is_in_zone(side, self.last_completed_zone) for side in ["left", "right"]): continue
                     
-                    if self._check_step_logic(future_step, now, update_status=False, centroid_only=True):
+                    if self._check_step_logic(future_step, now, update_status=False, centroid_only=True, shrink_factor=0.15):
                         future_step_detected = True
                         self.skip_frames_counter += 1
-                        tolerance = self.config.get("violation_tolerance", 3) * 1.5
-                        if self.skip_frames_counter >= tolerance:
+                        
+                        # Tolerance linh hoạt: Bước càng xa thì bắt càng gắt, bước ngay sát thì nới lỏng
+                        dist_to_step = i - self.current_step_idx
+                        multiplier = 2.5 if dist_to_step == 1 else 1.2
+                        
+                        base_tolerance = self.config.get("violation_tolerance", 3)
+                        effective_tolerance = base_tolerance * 1.5 * multiplier
+                        
+                        if self.skip_frames_counter >= effective_tolerance:
                             self.is_failed = True
                             self.failed_step_idx = self.current_step_idx
                             self.log_debug(f"VIOLATION: Skip Step detected. Future step {i} ({future_step['step_name']}) seen while at step {self.current_step_idx}", self.product_id)
@@ -206,6 +220,10 @@ class ProductEngine(BaseEngine):
                         break 
                 if not future_step_detected:
                     self.skip_frames_counter = 0
+                else:
+                    # Tối ưu: Chỉ thực sự xử lý vi phạm sau khi đã duyệt hết các bước tương lai
+                    # (self.skip_frames_counter đã được tăng ở trên nếu phát hiện bất kỳ bước nào)
+                    pass
 
         return self._get_status_result(active_zones, "processing")
 
@@ -241,7 +259,7 @@ class ProductEngine(BaseEngine):
         self.current_step_idx += 1
         self.step_start_time = now
         self.hit_count = 0
-        self.last_trigger_states = {}
+        self.last_trigger_states = {} # Reset trigger states to allow immediate detection in next step
         self._stay_timer = {}
         # Xóa lịch sử vùng của bước tiếp theo để tránh kích hoạt tức thì
         if self.current_step_idx < len(self.sop_steps):
@@ -295,7 +313,7 @@ class ProductEngine(BaseEngine):
             })
         return res
 
-    def _check_step_logic(self, step: Dict, now: float, update_status: bool = True, centroid_only: bool = False) -> bool:
+    def _check_step_logic(self, step: Dict, now: float, update_status: bool = True, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:
         logic = step.get("logic")
         if logic == "zone_trigger":
             target = step.get("required_zone")
@@ -304,7 +322,7 @@ class ProductEngine(BaseEngine):
             if target not in self._zone_last_seen: self._zone_last_seen[target] = {"left": 0, "right": 0}
             if update_status:
                 for side in ["left", "right"]:
-                    if self._is_in_zone(side, target, centroid_only=centroid_only): self._zone_last_seen[target][side] = now
+                    if self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor): self._zone_last_seen[target][side] = now
             time_limit = self.step_start_time
             effective_left = (self._zone_last_seen[target]["left"] > time_limit and now - self._zone_last_seen[target]["left"] < grace)
             effective_right = (self._zone_last_seen[target]["right"] > time_limit and now - self._zone_last_seen[target]["right"] < grace)
@@ -317,7 +335,7 @@ class ProductEngine(BaseEngine):
             mode = step.get("active_hand", "both")
             if target not in self._stay_timer: self._stay_timer[target] = {"left": 0, "right": 0}
             for side in ["left", "right"]:
-                if self._is_in_zone(side, target, centroid_only=centroid_only):
+                if self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor):
                     if self._stay_timer[target][side] == 0 and update_status: self._stay_timer[target][side] = now  
                 elif update_status: self._stay_timer[target][side] = 0 
             if mode == "any": return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
@@ -328,22 +346,38 @@ class ProductEngine(BaseEngine):
             count_needed = step.get("required_count", 1)
             mode = step.get("active_hand", "any")
             for side in ["left", "right"]:
-                is_in = self._is_in_zone(side, target, centroid_only=centroid_only)
+                is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 if update_status:
                     if is_in and not self.last_trigger_states.get(side, False): self.hit_count += 1
                     self.last_trigger_states[side] = is_in
             return self.hit_count >= count_needed
         elif logic == "dual_task":
             l_zone, r_zone = step.get("left_zone"), step.get("right_zone")
-            l_met = self._is_in_zone("left", l_zone)
-            r_met = self._is_in_zone("right", r_zone)
+            l_met = self._is_in_zone("left", l_zone, shrink_factor=shrink_factor)
+            r_met = self._is_in_zone("right", r_zone, shrink_factor=shrink_factor)
             return l_met and r_met
         return False
 
-    def _is_in_zone(self, side: str, zone_name: str, centroid_only: bool = False) -> bool:
+    def _is_in_zone(self, side: str, zone_name: str, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:
         zone_pts = self.zones.get(zone_name)
         if not zone_pts: return False
+        
         poly = np.array(zone_pts, np.float32)
+        
+        # Cơ chế Shrink: Thu nhỏ đa giác để kiểm tra vi phạm khắt khe hơn
+        if shrink_factor > 0:
+            M = cv2.moments(poly)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                # Di chuyển các điểm về phía tâm
+                shrunk_poly = []
+                for pt in zone_pts:
+                    px = pt[0] + (cx/640 - pt[0]) * shrink_factor # Giả định 640 là normalize base
+                    py = pt[1] + (cy/480 - pt[1]) * shrink_factor
+                    shrunk_poly.append([px, py])
+                poly = np.array(shrunk_poly, np.float32)
+
         w, h = self.config.get("w", 640), self.config.get("h", 480)
         for hand in self.last_hands:
             if hand["label"].lower() != side: continue

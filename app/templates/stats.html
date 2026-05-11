@@ -7,11 +7,19 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
     <h2 class="section-title"><span>STATISTICS</span> Thống kê hiệu suất</h2>
-    <div class="date-filter">
-        <label for="target-date" style="font-weight: 600; color: #666; margin-right: 10px;">Chọn ngày:</label>
-        <input type="date" id="target-date" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd;">
+    <div class="filters" style="display: flex; gap: 15px; align-items: center;">
+        <div class="filter-group">
+            <label for="filter-station" style="font-weight: 600; color: #666; margin-right: 8px;">Trạm:</label>
+            <select id="filter-station" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; min-width: 150px;">
+                <option value="">Tất cả trạm</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="target-date" style="font-weight: 600; color: #666; margin-right: 8px;">Ngày:</label>
+            <input type="date" id="target-date" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd;">
+        </div>
     </div>
 </div>
 
@@ -48,28 +56,63 @@
     let lineChart = null;
     let currentCameraId = null;
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
         const dateInput = document.getElementById('target-date');
+        const stationSelect = document.getElementById('filter-station');
+        
         const urlParams = new URLSearchParams(window.location.search);
-        currentCameraId = urlParams.get('camera_id');
+        currentCameraId = urlParams.get('camera_id') || "";
 
-        if (currentCameraId) {
-            const title = document.querySelector('.section-title');
-            if (title) title.innerHTML += ` <span style="font-size:1.2rem; color:var(--primary); background:none;">(Trạm: ${currentCameraId})</span>`;
-        }
+        // Load stations for dropdown
+        await loadFilterOptions(currentCameraId);
         
         const today = new Date().toISOString().split('T')[0];
         dateInput.value = today;
 
         loadStats(today, currentCameraId);
 
+        // Auto refresh every 30 seconds
+        setInterval(() => {
+            loadStats(dateInput.value, stationSelect.value);
+        }, 30000);
+
         dateInput.addEventListener('change', (e) => {
-            loadStats(e.target.value, currentCameraId);
+            loadStats(e.target.value, stationSelect.value);
+        });
+
+        stationSelect.addEventListener('change', (e) => {
+            currentCameraId = e.target.value;
+            loadStats(dateInput.value, currentCameraId);
+            
+            // Update URL without refreshing
+            const newUrl = currentCameraId ? `?camera_id=${currentCameraId}` : window.location.pathname;
+            window.history.pushState({}, '', newUrl);
         });
     });
 
+    async function loadFilterOptions(selectedId = '') {
+        try {
+            const response = await fetch('/api/cameras');
+            const cameras = await response.json();
+            const select = document.getElementById('filter-station');
+            
+            cameras.forEach(cam => {
+                const opt = document.createElement('option');
+                opt.value = cam.station_id;
+                opt.textContent = cam.name;
+                if (cam.station_id === selectedId) opt.selected = true;
+                select.appendChild(opt);
+            });
+        } catch (err) {
+            console.error("Error loading stations:", err);
+        }
+    }
+
     async function loadStats(date, cameraId = null) {
         try {
+            // Clean up cameraId
+            if (cameraId === "undefined" || cameraId === "null") cameraId = "";
+            
             let baseUrl = `/api/stats`;
             let filter = `date=${date}`;
             if (cameraId) filter += `&camera_id=${cameraId}`;
