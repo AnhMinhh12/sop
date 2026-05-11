@@ -1,4 +1,10 @@
 <aside class="w-64 bg-surface border-r border-slate-200 h-screen fixed left-0 top-0 flex flex-col hide-on-collapse z-40 sidebar-transition">
+    <!-- Nút thu gọn Sidebar -->
+    <button onclick="document.body.classList.toggle('sidebar-collapsed')" 
+            class="sidebar-toggle-btn group absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-white border border-slate-200 rounded-full shadow-sm flex items-center justify-center text-slate-400 hover:text-primary transition-all focus:outline-none z-50">
+        <svg id="sidebar-toggle-icon" class="w-4 h-4 transition-transform duration-300 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+    </button>
+
     <div class="p-6 flex items-center center-on-collapse border-b border-slate-100">
         <svg class="w-8 h-8 text-primary mr-3 flex-shrink-0" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect width="100" height="100" rx="25" fill="#2563eb"/>
