@@ -1,0 +1,58 @@
+<div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-3"></div>
+
+<div id="video-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center opacity-0 transition-opacity duration-300">
+    <div class="bg-surface rounded-2xl shadow-2xl overflow-hidden w-full max-w-4xl transform scale-95 transition-transform duration-300 mx-4">
+        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 id="modal-title" class="text-lg font-bold text-slate-800">Replay Violation</h3>
+            <button class="p-2 rounded-full text-slate-400 hover:text-danger hover:bg-red-50 transition-colors focus:outline-none" onclick="closeModal()">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="p-4 bg-black flex justify-center">
+            <video id="replay-video" controls autoplay class="w-full max-w-full rounded-lg max-h-[70vh]">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+</div>
+
+<script>
+    function closeModal() {
+        const modal = document.getElementById('video-modal');
+        const video = document.getElementById('replay-video');
+        if(video) video.pause();
+        modal.classList.remove('opacity-100');
+        modal.classList.add('opacity-0');
+        
+        // Remove active class from child to scale down
+        modal.firstElementChild.classList.remove('scale-100');
+        modal.firstElementChild.classList.add('scale-95');
+
+        setTimeout(() => {
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+        }, 300);
+    }
+
+    function openVideo(id, camId, type) {
+        const modal = document.getElementById('video-modal');
+        const title = document.getElementById('modal-title');
+        const video = document.getElementById('replay-video');
+        
+        title.textContent = `Vi phạm: ${type} - Trạm ${camId}`;
+        video.src = `/clip/${id}`;
+        
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        
+        // Give browser a moment to render flex before transitioning opacity
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            modal.classList.add('opacity-100');
+            
+            // Add active class to child to scale up
+            modal.firstElementChild.classList.remove('scale-95');
+            modal.firstElementChild.classList.add('scale-100');
+        }, 10);
+    }
+</script>

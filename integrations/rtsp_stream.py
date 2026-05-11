@@ -103,6 +103,10 @@ class RTSPStream:
             if self.cap is not None:
                 self.cap.release()
             
+            # Ép dùng TCP thay vì UDP để chống rớt gói tin gây lỗi h264 decode
+            if self.rtsp_url.startswith("rtsp://"):
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            
             # Sử dụng CAP_FFMPEG để ổn định hơn cho cả RTSP và File trên Windows
             self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
             

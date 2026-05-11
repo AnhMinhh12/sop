@@ -1,0 +1,34 @@
+<aside class="w-64 bg-surface border-r border-slate-200 h-screen fixed left-0 top-0 flex flex-col hide-on-collapse z-40 sidebar-transition">
+    <div class="p-6 flex items-center center-on-collapse border-b border-slate-100">
+        <svg class="w-8 h-8 text-primary mr-3 flex-shrink-0" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100" height="100" rx="25" fill="#2563eb"/>
+            <path d="M50 25s20 10 20 25v17l-20 8-20-8V50c0-15 20-25 20-25z" fill="white"/>
+        </svg>
+        <span class="text-xl font-bold text-slate-800 tracking-tight whitespace-nowrap hide-on-collapse">SOP Monitor</span>
+    </div>
+    
+    <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+        <a href="#" id="hub-link" class="flex items-center px-4 py-3 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-primary transition-colors center-on-collapse" title="Hub">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+            <span class="font-medium hide-on-collapse whitespace-nowrap">Hub</span>
+        </a>
+        <script>
+            document.getElementById('hub-link').href = "http://" + window.location.hostname + ":4000/";
+        </script>
+
+        <a href="{{ url_for('index') }}" class="flex items-center px-4 py-3 {% if request.endpoint == 'index' %}bg-primary/10 text-primary{% else %}text-slate-600 hover:bg-slate-50 hover:text-primary{% endif %} rounded-xl transition-colors center-on-collapse" title="Dashboard">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+            <span class="font-medium hide-on-collapse whitespace-nowrap">Dashboard</span>
+        </a>
+        
+        <a href="/history" class="flex items-center px-4 py-3 {% if request.path == '/history' %}bg-primary/10 text-primary{% else %}text-slate-600 hover:bg-slate-50 hover:text-primary{% endif %} rounded-xl transition-colors center-on-collapse" title="Lịch sử">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <span class="font-medium hide-on-collapse whitespace-nowrap">Lịch sử</span>
+        </a>
+        
+        <a href="/stats" class="flex items-center px-4 py-3 {% if request.path == '/stats' %}bg-primary/10 text-primary{% else %}text-slate-600 hover:bg-slate-50 hover:text-primary{% endif %} rounded-xl transition-colors center-on-collapse" title="Thống kê">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            <span class="font-medium hide-on-collapse whitespace-nowrap">Thống kê</span>
+        </a>
+    </nav>
+</aside>
