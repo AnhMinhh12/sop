@@ -31,7 +31,7 @@ body {
 /* Toast Notification */
 .toast-container {
     position: fixed;
-    top: 80px;
+    top: 20px; /* Đưa lên cao hơn để không bị chiếm chỗ phía dưới */
     right: 20px;
     z-index: 9999;
     display: flex;
@@ -312,7 +312,7 @@ header {
 /* Main Layout */
 .container {
     padding: 2rem;
-    max-width: 1600px;
+    max-width: 100%; /* Đổi từ 1600px sang 100% để fill hết màn hình */
     margin: 0 auto;
 }
 
@@ -458,20 +458,23 @@ header {
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08);
 }
 
-/* Video Wrapper - CHIẾM 65% BÊN TRÁI */
+/* Video Wrapper - CHIẾM PHẦN CÒN LẠI */
 .video-wrapper {
     position: relative;
-    width: 65%;
-    aspect-ratio: 16/9;
-    background-color: #f1f5f9;
+    flex: 1; /* Tự động co giãn chiếm hết chỗ trống */
+    min-height: 450px;
+    background-color: #000; /* Nền đen chuyên nghiệp cho camera */
     overflow: hidden;
     border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .video-feed {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover; /* Fill hết khung hình không để khoảng trắng */
 }
 
 /* Badge Status */
@@ -489,13 +492,14 @@ header {
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
-/* Info Panel - 35% BÊN PHẢI */
+/* Info Panel - Cố định độ rộng để bảng điều khiển không bị méo */
 .info-panel {
-    width: 35%;
-    padding: 2.5rem;
+    width: 420px;
+    flex-shrink: 0;
+    padding: 1.5rem 2.5rem 2.5rem 2.5rem; /* Giảm padding top để đẩy nội dung lên */
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: center; /* Căn giữa nội dung theo chiều dọc để cân bằng với video */
     background: #fafbfc;
 }
 

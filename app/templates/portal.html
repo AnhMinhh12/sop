@@ -7,7 +7,7 @@
     <title>AI Monitoring Hub - HTMP Systems</title>
 
     <!-- Localized Dependencies -->
-    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/tailwind.js') }}"></script>
     <style>
         @font-face {
             font-family: 'SystemSans';
@@ -125,9 +125,9 @@
 
         /* Main Content */
         main {
-            max-width: 1200px;
+            max-width: 100%;
             margin: 40px auto;
-            padding: 0 20px;
+            padding: 0 40px;
         }
 
         .page-header {
@@ -350,7 +350,7 @@
             <!-- Card 1: Presence Check -->
             <div class="card">
                 <div class="card-preview">
-                    <img src="{{ url_for('static', filename='illustration/check_person.jpg') }}" 
+                    <img src="{{ config.HUB_URL }}{{ url_for('static', filename='illustration/check_person.jpg') }}" 
                          class="absolute inset-0 w-full h-full object-cover" alt="Presence Check">
                     <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>
@@ -366,7 +366,7 @@
             <!-- Card 2: SOP Monitoring -->
             <div class="card">
                 <div class="card-preview">
-                    <img src="{{ url_for('static', filename='illustration/sop.jpg') }}" 
+                    <img src="{{ config.HUB_URL }}{{ url_for('static', filename='illustration/sop.jpg') }}" 
                          class="absolute inset-0 w-full h-full object-cover" alt="SOP Monitoring">
                     <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>
@@ -374,7 +374,7 @@
                     <h3>Kiểm tra thao tác công nhân</h3>
                     <p>Phân tích và đối chiếu các bước thực hiện của công nhân với quy trình chuẩn (SOP) thời gian thực.
                     </p>
-                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5001/'"
+                    <a href="/sop"
                         class="btn-view">View Details</a>
                 </div>
             </div>

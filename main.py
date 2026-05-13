@@ -19,16 +19,16 @@ os.environ["OMP_NUM_THREADS"] = os.getenv("OMP_NUM_THREADS", "1")
 os.environ["MKL_NUM_THREADS"] = os.getenv("MKL_NUM_THREADS", "1")
 os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
 
-from services.config_loader import ConfigLoader
-from services.disk_monitor import DiskMonitor
-from pipelines.inference_engine import InferenceEngine
-from pipelines.frame_processor import FrameProcessor
-from core.engines.loader import EngineLoader
-from core.violation_detector import ViolationDetector
-from events.audio_alert import AudioAlert
-from events.clip_saver import ClipSaver
-from db.db import db
-from db.cleanup import StorageCleanup
+from shared.services.config_loader import ConfigLoader
+from shared.services.disk_monitor import DiskMonitor
+from shared.inference_engine import InferenceEngine
+from projects.sop_monitoring.processor import FrameProcessor
+from projects.sop_monitoring.core.engines.loader import EngineLoader
+from projects.sop_monitoring.core.violation_detector import ViolationDetector
+from shared.events.audio_alert import AudioAlert
+from shared.events.clip_saver import ClipSaver
+from shared.db.db import db
+from shared.db.cleanup import StorageCleanup
 from app import app as flask_app, socketio, processors
 
 # Đảm bảo các thư mục dữ liệu tồn tại
@@ -116,7 +116,7 @@ def start_sop_monitoring():
         logger.error(f"Main: AudioAlert failed to init: {e}. System will continue without audio.")
 
     # 5. Khởi tạo từng trạm Camera và đồng bộ Database
-    from db.queries import CameraQueries, DefinitionQueries
+    from shared.db.queries import CameraQueries, DefinitionQueries
 
     logger.info(f"Main: Found {len(config['cameras'])} cameras in config.")
     for cam_cfg in config["cameras"]:

@@ -335,11 +335,11 @@ function showToast({ type = 'success', title, body, details, time }) {
     
     container.appendChild(toast);
     
-    // Tự động xóa sau 8 giây
+    // Tự động xóa sau 3 giây
     setTimeout(() => {
         toast.classList.add('removing');
         setTimeout(() => toast.remove(), 500);
-    }, 8000);
+    }, 3000);
 }
 
 async function loadRecentEvents(cameraId = null) {

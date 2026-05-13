@@ -4,15 +4,21 @@ import time
 import psutil
 from flask import render_template, Response, jsonify, request, send_from_directory
 from app import app, processors
-from services.config_loader import ConfigLoader
-from services.disk_monitor import DiskMonitor
-from db.db import db
-from db.queries import EventQueries, CameraQueries, DefinitionQueries
+from shared.services.config_loader import ConfigLoader
+from shared.services.disk_monitor import DiskMonitor
+from shared.db.db import db
+from shared.db.queries import EventQueries, CameraQueries, DefinitionQueries
 
 #xin chao
 @app.route('/')
 def index():
-    """Trang chủ dashboard SOP (Tổng hợp)."""
+    """Trang chủ AI Monitoring Hub (Tổng hợp các dự án)."""
+    return render_template('portal.html')
+
+
+@app.route('/sop')
+def sop_dashboard():
+    """Trang lưới camera cho dự án SOP Monitoring."""
     return render_template('index.html')
 
 
@@ -65,6 +71,24 @@ def video_feed(camera_id):
     """Endpoint cho livestream."""
     return Response(gen_frames(camera_id),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/api/shared/templates/<path:template_name>')
+def get_shared_template(template_name):
+    """API cho phép các server con lấy nội dung file giao diện chuẩn."""
+    # Chỉ cho phép lấy các template an toàn
+    allowed_templates = ['base.html', 'partials/sidebar.html', 'partials/header.html', 'partials/modals.html']
+    
+    if template_name not in allowed_templates:
+        return jsonify({"error": "Template not found or not allowed"}), 404
+        
+    try:
+        template_path = os.path.join(app.template_folder, template_name)
+        with open(template_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content, mimetype='text/html')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/cameras')

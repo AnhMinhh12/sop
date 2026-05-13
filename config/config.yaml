@@ -7,7 +7,7 @@ server:
 products:
   - id: "san_pham_a"
     name: "Sản phẩm A"
-    sop_file: "config/sop_definitions/san_pham_a.yaml"
+    sop_file: "projects/sop_monitoring/config/san_pham_a.yaml"
 
 inference:
   device: "cpu"
@@ -17,14 +17,14 @@ inference:
 
 models:
   yolo:
-    weights: "models/yolo/san_pham_a.onnx"
+    weights: "shared/models/yolo/san_pham_a.onnx"
     input_size: 640
     fps_cap: 15
     conf_threshold: 0.25
     iou_threshold: 0.4516
   lstm:
-    weights: "models/lstm/step_classifier.pt"
-    label_map: "models/lstm/label_map.json"
+    weights: "shared/models/lstm/step_classifier.pt"
+    label_map: "shared/models/lstm/label_map.json"
     window_size: 16
     step_size: 2
     confidence_threshold: 0.3
@@ -35,7 +35,7 @@ cameras:
     name: "Trạm lắp ráp 1"
     rtsp_url: "D:/Apps/SOP_HTMP/random.mp4"
     #rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
-    sop_file: "config/sop_definitions/san_pham_a.yaml"
+    sop_file: "projects/sop_monitoring/config/san_pham_a.yaml"
     engine_id: "san_pham_a"
     resolution: [640, 480]
     fps_cap: 15
@@ -43,7 +43,7 @@ cameras:
 alerts:
   audio:
     enabled: true
-    sound_file: "sounds/alert.wav"
+    sound_file: "shared/assets/sounds/alert.wav"
     volume: 0.8
     cooldown_sec: 10
 
