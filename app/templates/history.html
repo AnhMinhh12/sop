@@ -89,23 +89,29 @@
                     'skip_step': 'Bỏ bước',
                     'timeout': 'Quá giờ',
                     'wrong_step': 'Sai bước',
-                    'premature_restart': 'Reset sớm'
+                    'premature_restart': 'Reset sớm',
+                    'success': 'Hoàn thành'
                 };
                 const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
+                const isViolation = ev.sop_status === 'violation';
                 
                 const row = document.createElement('tr');
                 row.className = 'event-row';
+                if (!isViolation) row.style.opacity = '0.8';
+                
                 row.innerHTML = `
                     <td>${ev.timestamp}</td>
-                    <td><span class="badge-station">${ev.camera_id || 'N/A'}</span></td>
-                    <td><span class="event-type">${vTypeVN}</span></td>
+                    <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
+                    <td><span class="event-type ${isViolation ? 'text-danger' : 'text-secondary'}">${vTypeVN}</span></td>
                     <td>${ev.expected_step || '-'}</td>
                     <td>${ev.step_detected || '-'}</td>
                     <td>${(ev.confidence * 100).toFixed(1)}%</td>
                     <td>
-                        <button class="btn-action" onclick="openVideo(${ev.id}, '${ev.camera_id}', '${vTypeVN}')">
+                        ${isViolation && ev.clip_path ? `
+                        <button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">
                             ▶ XEM LẠI
                         </button>
+                        ` : '<span class="text-xs text-slate-400">Không có video</span>'}
                     </td>
                 `;
                 list.appendChild(row);

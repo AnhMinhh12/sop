@@ -420,6 +420,8 @@ class SpatialEngine:
 
             base_res.update({
                 "detected_label": "VI PHẠM - QUAY LẠI BƯỚC 1",
+                "status_msg": "CÓ LỖI - VỀ BƯỚC 1",
+                "expected_step": self.sop_steps[0]["step_name"] if self.sop_steps else "Ready",
                 "sop_status": status,
                 "violation_type": self.violation_type or "skip_step",
                 "step_index": 0,           # Reset về bước 1 trên UI để bỏ tích

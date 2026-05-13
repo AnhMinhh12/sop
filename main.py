@@ -43,10 +43,10 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.WARNING) # Chỉ hiện Warning/Error ra terminal cho gọn
 
 from logging.handlers import TimedRotatingFileHandler
-# Xoay vòng system.log mỗi 7 ngày (backupCount=1 để giữ lại 1 bản cũ nếu muốn, hoặc 0 để xóa luôn)
+# Xoay vòng system.log hàng ngày và giữ lại 30 bản (1 tháng)
 file_handler = TimedRotatingFileHandler(
     os.getenv("LOG_FILE", "data/logs/system.log"), 
-    when="D", interval=7, backupCount=1, encoding='utf-8'
+    when="D", interval=1, backupCount=30, encoding='utf-8'
 )
 file_handler.setLevel(logging.INFO)
 

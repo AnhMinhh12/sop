@@ -148,7 +148,16 @@
             'skip_step': 'Bỏ bước',
             'timeout': 'Quá giờ',
             'wrong_step': 'Sai bước',
-            'premature_restart': 'Reset sớm'
+            'premature_restart': 'Reset sớm',
+            'idle_timeout': 'Nghỉ quá lâu'
+        };
+
+        const typeColors = {
+            'skip_step': '#ef4444',         // Red
+            'timeout': '#f59e0b',           // Orange
+            'wrong_step': '#6366f1',        // Indigo
+            'premature_restart': '#10b981', // Green
+            'idle_timeout': '#8b5cf6'       // Purple
         };
 
         if (pieChart) pieChart.destroy();
@@ -166,13 +175,16 @@
             return;
         }
 
+        // Tạo mảng màu tương ứng với các labels hiện có
+        const backgroundColors = labels.map(l => typeColors[l] || '#94a3b8');
+
         pieChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: labels.map(l => typeMap[l] || l),
                 datasets: [{
                     data: values,
-                    backgroundColor: ['#ef4444', '#f59e0b', '#6366f1', '#10b981', '#8b5cf6'],
+                    backgroundColor: backgroundColors,
                     borderWidth: 0
                 }]
             },

@@ -116,10 +116,13 @@ class EventQueries:
         cursor = conn.cursor()
 
         try:
-            cursor.execute(
-                "SELECT * FROM sop_events ORDER BY timestamp DESC LIMIT %s",
-                (limit,)
-            )
+            cursor.execute("""
+                SELECT e.*, c.station_id 
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                ORDER BY e.timestamp DESC 
+                LIMIT %s
+            """, (limit,))
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"DB Error getting recent events: {e}")
@@ -293,7 +296,7 @@ class EventQueries:
 
         try:
             cursor.execute("""
-                SELECT e.* FROM sop_events e
+                SELECT e.*, c.station_id FROM sop_events e
                 JOIN sop_cameras c ON e.camera_id = c.id
                 WHERE c.station_id = %s
                 ORDER BY e.timestamp DESC

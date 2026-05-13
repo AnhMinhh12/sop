@@ -2,7 +2,10 @@ import cv2
 import os
 import time
 import psutil
+import logging
 from flask import render_template, Response, jsonify, request, send_from_directory
+
+logger = logging.getLogger(__name__)
 from app import app, processors
 from shared.services.config_loader import ConfigLoader
 from shared.services.disk_monitor import DiskMonitor
@@ -107,8 +110,14 @@ def get_events():
     else:
         events = EventQueries.get_recent_events(limit=limit)
 
-    # Chuyển datetime thành string để JSON serialize được
+    # Chuyển datetime và BIGINT thành string để tránh lỗi precision ở Frontend JS
     for ev in events:
+        if ev.get("id"):
+            ev["id"] = str(ev["id"])
+        if ev.get("camera_id"):
+            ev["camera_id"] = str(ev["camera_id"])
+        if ev.get("station_id"):
+            ev["station_id"] = str(ev["station_id"])
         if ev.get("timestamp"):
             ev["timestamp"] = str(ev["timestamp"])
 
@@ -162,9 +171,23 @@ def get_clip_by_id(event_id):
             "SELECT clip_path FROM sop_events WHERE id = %s", (event_id,)
         )
         event = cursor.fetchone()
-        if event and event['clip_path'] and os.path.exists(event['clip_path']):
-            filename = os.path.basename(event['clip_path'])
-            return send_from_directory(os.path.abspath("data/violations"), filename)
+        
+        # Thử nhiều cách để tìm file clip
+        if event and event['clip_path']:
+            clip_path = event['clip_path']
+            filename = os.path.basename(clip_path)
+            violations_dir = os.path.abspath(os.getenv("VIOLATIONS_DIR", "data/violations"))
+            
+            # 1. Thử path tuyệt đối từ DB
+            if os.path.exists(clip_path):
+                return send_from_directory(os.path.dirname(clip_path), filename)
+            
+            # 2. Thử tìm trong thư mục violations mặc định
+            full_path = os.path.join(violations_dir, filename)
+            if os.path.exists(full_path):
+                return send_from_directory(violations_dir, filename)
+                
+        logger.warning(f"Clip not found for event_id={event_id}")
         return "Clip not found", 404
     finally:
         cursor.close()
