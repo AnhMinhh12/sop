@@ -47,7 +47,8 @@ class ClipSaver:
             # imageio ffmpeg support: https://imageio.readthedocs.io/en/stable/format_ffmpeg.html
             with imageio.get_writer(filepath, fps=save_fps, codec='libx264', 
                                    quality=None,  # Để dùng bitrate/preset
-                                   ffmpeg_params=['-preset', 'ultrafast', '-crf', '28'],
+                                   ffmpeg_params=['-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p'],
+                                   pixelformat='yuv420p', # Dùng tham số chính thức của imageio thay vì ép qua ffmpeg_params
                                    macro_block_size=1) as writer:
                 for frame in frames:
                     # OpenCV uses BGR, imageio uses RGB

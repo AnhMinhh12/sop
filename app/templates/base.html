@@ -27,22 +27,26 @@
             theme: {
                 extend: {
                     colors: {
-                        "primary": "#2563eb",     /* Blue 600 - More saturated */
-                        "secondary": "#10b981",   /* Emerald 500 */
-                        "accent": "#f59e0b",      /* Amber 500 */
-                        "danger": "#dc2626",      /* Red 600 */
-                        "background": "#f1f5f9",  /* Slate 100 */
-                        "surface": "#ffffff",
-                        "text-main": "#0f172a",   /* Slate 900 - Darker for clarity */
-                        "text-muted": "#475569"   /* Slate 600 */
+                        "primary": "var(--primary)",
+                        "secondary": "var(--secondary)",
+                        "accent": "var(--accent)",
+                        "danger": "var(--danger)",
+                        "background": "var(--bg)",
+                        "surface": "var(--card-bg)",
+                        "text-main": "var(--text-main)",
+                        "text-muted": "var(--text-muted)"
                     },
                     fontFamily: {
-                        "sans": ["'SystemSans'", "sans-serif"],
-                        "headline": ["'SystemSans'", "sans-serif"],
-                        "body": ["'SystemSans'", "sans-serif"],
-                        "mono": ["Courier New", "monospace"]
+                        "sans": ["var(--font-main)", "sans-serif"],
+                        "headline": ["var(--font-main)", "sans-serif"],
+                        "body": ["var(--font-main)", "sans-serif"],
+                        "mono": ["var(--font-mono)", "monospace"]
                     },
                     borderRadius: {
+                        "sm": "var(--radius-sm)",
+                        "md": "var(--radius-md)",
+                        "lg": "var(--radius-lg)",
+                        "xl": "var(--radius-xl)",
                         "4xl": "2rem",
                         "5xl": "3rem"
                     }
@@ -175,18 +179,24 @@
 </head>
 <body class="font-body selection:bg-primary/20">
     <div class="flex">
-        {% include 'partials/sidebar.html' %}
+        {% block sidebar %}
+            {% include 'partials/sidebar.html' %}
+        {% endblock %}
         
         <main class="flex-1 ml-20 lg:ml-64 min-h-screen sidebar-transition">
-            {% include 'partials/header.html' %}
+            {% block header %}
+                {% include 'partials/header.html' %}
+            {% endblock %}
             
-            <div class="p-6 lg:p-10">
+            <div id="main-content-area" class="p-6 lg:p-10 animate-fadeIn">
                 {% block content %}{% endblock %}
             </div>
         </main>
     </div>
 
-    {% include 'partials/modals.html' %}
+    {% block modals %}
+        {% include 'partials/modals.html' %}
+    {% endblock %}
     <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/main.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>

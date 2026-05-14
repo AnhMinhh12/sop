@@ -120,6 +120,7 @@ class EventQueries:
                 SELECT e.*, c.station_id 
                 FROM sop_events e
                 LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                WHERE e.sop_status = 'violation'
                 ORDER BY e.timestamp DESC 
                 LIMIT %s
             """, (limit,))

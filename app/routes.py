@@ -86,10 +86,25 @@ def get_shared_template(template_name):
         return jsonify({"error": "Template not found or not allowed"}), 404
         
     try:
-        template_path = os.path.join(app.template_folder, template_name)
+        # Sử dụng đường dẫn tuyệt đối để tránh lỗi Errno 2 khi chạy từ thư mục khác
+        template_path = os.path.join(app.root_path, app.template_folder, template_name)
         with open(template_path, 'r', encoding='utf-8') as f:
             content = f.read()
         return Response(content, mimetype='text/html')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/shared/manifest')
+def get_ui_manifest():
+    """API trả về thông tin phiên bản giao diện hiện tại."""
+    try:
+        manifest_path = os.path.join(app.root_path, app.static_folder, 'ui_manifest.json')
+        if os.path.exists(manifest_path):
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                import json
+                return jsonify(json.load(f))
+        return jsonify({"error": "Manifest not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -176,16 +191,36 @@ def get_clip_by_id(event_id):
         if event and event['clip_path']:
             clip_path = event['clip_path']
             filename = os.path.basename(clip_path)
-            violations_dir = os.path.abspath(os.getenv("VIOLATIONS_DIR", "data/violations"))
+            
+            # Tính toán project root tuyệt đối dựa trên vị trí file routes.py hiện tại
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(app_dir)
+            violations_dir = os.path.join(project_root, "data", "violations")
             
             # 1. Thử path tuyệt đối từ DB
+            target_path = ""
             if os.path.exists(clip_path):
-                return send_from_directory(os.path.dirname(clip_path), filename)
-            
-            # 2. Thử tìm trong thư mục violations mặc định
-            full_path = os.path.join(violations_dir, filename)
-            if os.path.exists(full_path):
-                return send_from_directory(violations_dir, filename)
+                target_path = os.path.abspath(clip_path)
+            else:
+                # 2. Thử tìm trong thư mục violations mặc định của project root
+                full_path = os.path.join(violations_dir, filename)
+                if os.path.exists(full_path):
+                    target_path = os.path.abspath(full_path)
+                else:
+                    # 3. Thử tìm trong CWD hiện tại
+                    cwd_path = os.path.abspath(os.path.join("data", "violations", filename))
+                    if os.path.exists(cwd_path):
+                        target_path = cwd_path
+
+            if target_path:
+                # Dùng send_file với conditional=True để hỗ trợ Range Requests (tua video)
+                from flask import send_file
+                return send_file(
+                    target_path, 
+                    mimetype='video/mp4',
+                    as_attachment=False,
+                    conditional=True
+                )
                 
         logger.warning(f"Clip not found for event_id={event_id}")
         return "Clip not found", 404

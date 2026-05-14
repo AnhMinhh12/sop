@@ -1,15 +1,40 @@
 :root {
+    /* Brand Colors */
     --primary: #2d5cf7;
+    --primary-hover: #1e40af;
     --secondary: #6366f1;
-    --bg: #f8fafc;
-    --card-bg: #ffffff;
+    --accent: #f59e0b;
+    
+    /* Semantic Colors */
     --danger: #ef4444;
     --success: #10b981;
     --warning: #f59e0b;
+    --info: #3b82f6;
+    
+    /* Neutral Colors */
+    --bg: #f8fafc;
+    --card-bg: #ffffff;
+    --sidebar-bg: #ffffff;
+    --header-bg: #ffffff;
     --text-main: #1e293b;
     --text-muted: #64748b;
     --border: #e2e8f0;
+    
+    /* Typography */
+    --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    
+    /* Effects */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    
+    /* Spacing & Radius */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+    --radius-full: 9999px;
 }
 
 * {
@@ -392,7 +417,7 @@ header {
 .overview-header-icon {
     position: relative;
     width: 100%;
-    height: 80px;
+    height: 140px;
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     display: flex;
     align-items: center;
@@ -403,6 +428,13 @@ header {
 .station-icon {
     font-size: 2rem;
     opacity: 0.5;
+}
+
+.station-illustration {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .overview-card .status-badge {
