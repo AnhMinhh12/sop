@@ -183,12 +183,12 @@
             {% include 'partials/sidebar.html' %}
         {% endblock %}
         
-        <main class="flex-1 ml-20 lg:ml-64 min-h-screen sidebar-transition">
+        <main class="flex-1 ml-20 lg:ml-[280px] min-h-screen sidebar-transition">
             {% block header %}
                 {% include 'partials/header.html' %}
             {% endblock %}
             
-            <div id="main-content-area" class="p-6 lg:p-10 animate-fadeIn">
+            <div id="main-content-area" class="p-4 lg:p-6 animate-fadeIn">
                 {% block content %}{% endblock %}
             </div>
         </main>
@@ -197,6 +197,7 @@
     {% block modals %}
         {% include 'partials/modals.html' %}
     {% endblock %}
+    <div id="toast-container" class="toast-container"></div>
     <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/main.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>

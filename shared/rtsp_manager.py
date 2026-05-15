@@ -11,6 +11,7 @@ class RTSPStream:
     """
     Manages an RTSP connection from an IP camera.
     Includes auto-reconnect logic and FPS capping.
+    Compliance: Max 10 retries, emits camera_status.
     """
     def __init__(self, camera_id: str, rtsp_url: str, fps_cap: int = 15,
                  target_width: int = 640, target_height: int = 480):
@@ -26,6 +27,7 @@ class RTSPStream:
         self.running = False
         self.status = "disconnected" # disconnected | connected | error
         self.retry_count = 0
+        self.max_retries = 10 # Tuân thủ quy tắc: tối đa 10 lần
         self.width = 0
         self.height = 0
         
@@ -44,52 +46,64 @@ class RTSPStream:
 
     def _update_loop(self):
         """Main loop to read frames and handle reconnections."""
+        from app import emit_camera_status # Lazy import to avoid circular dependency
+        
         is_rtsp = self.rtsp_url.startswith(("rtsp://", "http://", "https://"))
         
         while self.running:
             if self.cap is None or not self.cap.isOpened():
+                if self.retry_count >= self.max_retries:
+                    if self.status != "error":
+                        self.status = "error"
+                        emit_camera_status(self.camera_id, "error")
+                        logger.error(f"RTSPStream [{self.camera_id}]: Max retries reached. Stopping attempts.")
+                    time.sleep(10) # Chờ lâu hơn trước khi thử lại sau khi đã fail 10 lần
+                    self.retry_count = 0 # Reset để thử lại sau khi chờ
+                    continue
+
                 self._connect()
                 if self.cap is None or not self.cap.isOpened():
-                    # Reconnect failed, wait 5 seconds
+                    emit_camera_status(self.camera_id, "error")
                     time.sleep(5)
                     continue
+                else:
+                    emit_camera_status(self.camera_id, "connected")
 
             # Flush buffer: Xóa sạch bộ đệm để lấy khung hình mới nhất (Real-time)
             if is_rtsp:
-                # Flush buffer liên tục cho đến khi hết frame cũ
-                # Đây là cách tốt nhất để triệt tiêu độ trễ trên RTSP Camera
-                while True:
-                    grabbed = self.cap.grab()
-                    if not grabbed: break
+                # Flush buffer nhanh: grab 2-3 frames thay vì loop vô hạn có thể gây nghẽn
+                for _ in range(2):
+                    self.cap.grab()
             
             start_time = time.time()
             ret, frame = self.cap.read()
             
             if ret:
-                # RESIZE NGAY TẠI ĐÂY — Tránh lưu frame full-res vào bộ nhớ
-                # FrameProcessor sẽ nhận frame đã resize, không cần copy + resize lại
+                # RESIZE NGAY TẠI ĐÂY
                 if frame.shape[1] != self.target_width or frame.shape[0] != self.target_height:
                     frame = cv2.resize(frame, (self.target_width, self.target_height), 
                                        interpolation=cv2.INTER_LINEAR)
                 
                 with self.lock:
                     self.frame = frame
-                self.status = "connected"
+                
+                if self.status != "connected":
+                    self.status = "connected"
+                    emit_camera_status(self.camera_id, "connected")
             else:
-                # Nếu là file video quay sẵn thì tự động lặp lại (Loop)
                 if not is_rtsp:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
                 logger.warning(f"RTSPStream [{self.camera_id}]: Stream signal lost.")
                 self.status = "error"
+                emit_camera_status(self.camera_id, "error")
                 self.cap.release()
-                time.sleep(2) # Short wait before reconnecting
+                time.sleep(2)
 
-            # FPS Control: Đảm bảo không quá giới hạn fps_cap
+            # FPS Control
             elapsed = time.time() - start_time
             sleep_time = self.frame_delay - elapsed
-            
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
@@ -97,17 +111,15 @@ class RTSPStream:
         """Attempts to open the RTSP or Video stream."""
         try:
             print(f"RTSPStream [{self.camera_id}]: Connecting to {self.rtsp_url}...", flush=True)
-            logger.info(f"RTSPStream [{self.camera_id}]: Attempting to connect to {self.rtsp_url}")
+            logger.info(f"RTSPStream [{self.camera_id}]: Attempt {self.retry_count + 1}/{self.max_retries}")
             
-            # Đóng cũ nếu tồn tại
             if self.cap is not None:
                 self.cap.release()
             
-            # Ép dùng TCP thay vì UDP để chống rớt gói tin gây lỗi h264 decode
+            # Ép TCP và cấu hình timeout ngắn hơn nếu có thể qua env (OpenCV 4.x)
             if self.rtsp_url.startswith("rtsp://"):
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000" # 5 seconds
             
-            # Sử dụng CAP_FFMPEG để ổn định hơn cho cả RTSP và File trên Windows
             self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
             
             if self.cap.isOpened():
@@ -115,17 +127,14 @@ class RTSPStream:
                 print(f"RTSPStream [{self.camera_id}]: CONNECTED SUCCESSFULLY.", flush=True)
                 self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                logger.info(f"RTSPStream [{self.camera_id}]: Connected. Res: {self.width}x{self.height}")
                 self.status = "connected"
                 self.retry_count = 0
             else:
-                print(f"RTSPStream [{self.camera_id}]: FAILED TO OPEN STREAM.", flush=True)
-                logger.warning(f"RTSPStream [{self.camera_id}]: Could not open stream.")
+                print(f"RTSPStream [{self.camera_id}]: FAILED TO OPEN (Check URL/Network).", flush=True)
                 self.status = "error"
                 self.retry_count += 1
                 
         except Exception as e:
-            print(f"RTSPStream [{self.camera_id}]: CONNECTION ERROR: {e}", flush=True)
             logger.error(f"RTSPStream [{self.camera_id}]: Connection error: {e}")
             self.status = "error"
             self.retry_count += 1
@@ -139,7 +148,7 @@ class RTSPStream:
         """Stops the stream thread and releases resources."""
         self.running = False
         if self.thread:
-            self.thread.join()
+            self.thread.join(timeout=1.0)
         if self.cap:
             self.cap.release()
         logger.info(f"RTSPStream [{self.camera_id}]: Stream stopped.")

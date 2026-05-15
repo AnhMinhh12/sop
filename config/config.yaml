@@ -18,7 +18,7 @@ inference:
 models:
   yolo:
     weights: "shared/models/yolo/san_pham_a.onnx"
-    input_size: 640
+    input_size: 416
     fps_cap: 15
     conf_threshold: 0.25
     iou_threshold: 0.4516

@@ -45,3 +45,12 @@ def emit_violation(camera_id, violation_data):
         'detected_step': violation_data.get('detected_label', 'N/A'), # Sẽ đồng bộ key sang detected_step
         'timestamp': time.strftime('%H:%M:%S')
     })
+
+def emit_camera_status(camera_id: str, status: str):
+    """
+    Emits camera status updates (connected, error, disconnected).
+    """
+    socketio.emit('camera_status', {
+        'camera_id': camera_id,
+        'status': status
+    })

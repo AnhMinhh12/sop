@@ -48,9 +48,12 @@ while True:
     temp_frame = frame.copy()
     
     # Vẽ các vùng đã lưu (Màu xanh lá)
-    for poly in all_polygons:
-        pts = np.array(poly, np.int32)
+    for item in all_polygons:
+        pts = np.array(item["pixel_points"], np.int32)
         cv2.polylines(temp_frame, [pts], True, (0, 255, 0), 2)
+        # Hiển thị tên vùng
+        cv2.putText(temp_frame, item["name"], (pts[0][0], pts[0][1] - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
     # Vẽ vùng đang chọn (Màu đỏ/xanh dương)
     for pt in current_points:
@@ -69,9 +72,21 @@ while True:
 
     # Nhấn 's' để lưu tọa độ
     if key == ord('s') and len(current_points) == 4:
+        # MỚI: Cho phép nhập tên vùng để đỡ phải sửa tay trong YAML
+        print("\n" + "-"*30)
+        zone_name = input("📝 Nhập tên vùng (VD: middle_table, mold...): ").strip()
+        if not zone_name: 
+            zone_name = f"zone_{len(all_polygons)+1}"
+        
         rel_points = [[round(p[0]/w, 3), round(p[1]/h, 3)] for p in current_points]
-        all_polygons.append(current_points)
-        print(f"\n✅ ĐÃ LƯU VÙNG: {rel_points}")
+        all_polygons.append({
+            "name": zone_name, 
+            "points": rel_points,
+            "pixel_points": list(current_points)
+        })
+        
+        print(f"✅ ĐÃ LƯU '{zone_name}': {rel_points}")
+        print("-"*30)
         current_points = []
         print("💡 Gợi ý: Chọn tiếp vùng khác hoặc nhấn 'q' để kết thúc.")
 
@@ -86,11 +101,10 @@ while True:
 
 # In kết quả cuối cùng để copy vào YAML
 print("\n" + "="*60)
-print("DANH SÁCH Tọa độ QUY ĐỔI (Copy dán vào config/sop_definitions/):")
+print("DANH SÁCH TỌA ĐỘ (Copy dán trực tiếp dưới mục 'zones:' trong YAML):")
 print("="*60)
-for i, poly in enumerate(all_polygons):
-    rel_poly = [[round(p[0]/w, 3), round(p[1]/h, 3)] for p in poly]
-    print(f"zone_{i+1}: {rel_poly}")
+for item in all_polygons:
+    print(f"  {item['name']}: {item['points']}")
 print("="*60)
 
 cv2.destroyAllWindows()

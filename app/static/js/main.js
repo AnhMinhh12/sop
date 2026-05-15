@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
  */
 async function initDashboard() {
     console.log("Detecting page context...");
-    
+
     // Dọn dẹp các interval cũ để tránh rác bộ nhớ
     if (healthInterval) {
         clearInterval(healthInterval);
@@ -41,8 +41,8 @@ async function initDashboard() {
             const cameras = await response.json();
             renderOverviewGrid(cameras);
         } catch (err) { console.error("Failed to load cameras:", err); }
-    } 
-    
+    }
+
     // 2. Nếu là trang Chi tiết trạm
     else if (stationContainer) {
         try {
@@ -80,7 +80,7 @@ async function initDashboard() {
 async function initHistoryPage(selectedId = "") {
     const stationSelect = document.getElementById('filter-station');
     const dateInput = document.getElementById('filter-date');
-    
+
     if (stationSelect && stationSelect.options.length <= 1) {
         const response = await fetch('/api/cameras');
         const cameras = await response.json();
@@ -94,7 +94,7 @@ async function initHistoryPage(selectedId = "") {
     }
 
     loadHistory(selectedId, dateInput ? dateInput.value : "");
-    
+
     // Gán sự kiện cho nút tìm kiếm nếu chưa có
     const searchBtn = document.querySelector('.btn-primary');
     if (searchBtn) {
@@ -108,16 +108,16 @@ async function loadHistory(stationId = '', date = '') {
     const list = document.getElementById('history-list');
     if (!list) return;
     list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
-    
+
     let url = `/api/events?limit=100`;
     if (stationId) url += `&camera_id=${stationId}`;
     if (date) url += `&date=${date}`;
-    
+
     try {
         const response = await fetch(url);
         const events = await response.json();
         list.innerHTML = '';
-        
+
         if (events.length === 0) {
             list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào</td></tr>';
             return;
@@ -234,7 +234,7 @@ function renderOverviewGrid(cameras) {
     if (!grid) return;
     grid.innerHTML = '';
     cameras.forEach(cam => {
-        const illustrationHtml = cam.illustration 
+        const illustrationHtml = cam.illustration
             ? `<img src="${cam.illustration}" class="station-illustration" alt="${cam.name}">`
             : `<div class="station-icon">📸</div>`;
         const card = document.createElement('a');
@@ -256,33 +256,266 @@ function renderOverviewGrid(cameras) {
 function renderStationDetail(cam) {
     const container = document.getElementById('station-container');
     if (!container) return;
+
     container.innerHTML = `
-        <div class="station-card" id="station-${cam.id}">
-            <div class="video-wrapper">
-                <img class="video-feed" src="/video_feed/${cam.id}" alt="Stream">
-                <div class="bimanual-status">LH<div id="lh-${cam.id}" class="dot"></div> RH<div id="rh-${cam.id}" class="dot"></div></div>
+        <div class="station-card" id="station-${cam.id}" style="height: calc(100vh - 140px); min-height: 500px;">
+            <div class="video-section">
+                <div class="video-wrapper">
+                    <img class="video-feed" src="/video_feed/${cam.id}" alt="Stream">
+                    <div class="bimanual-status">LH<div id="lh-${cam.id}" class="dot"></div> RH<div id="rh-${cam.id}" class="dot"></div></div>
+                </div>
             </div>
             <div class="info-panel">
-                <div class="station-name">${cam.name}</div>
-                <div id="status-${cam.id}" class="status-indicator">INIT</div>
-                <div id="step-name-${cam.id}" class="overview-step">Ready</div>
-                <div class="progress-bar"><div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div></div>
-                <div id="status-msg-${cam.id}" class="status-msg">Sẵn sàng</div>
-                <div id="step-list-${cam.id}" class="sop-steps-list"></div>
+                <div class="station-header">
+                    <div class="station-name">${cam.name}</div>
+                    <div id="status-${cam.id}" class="status-indicator">READY</div>
+                </div>
+
+                <div class="product-selector-box mb-4">
+                    <label class="panel-title">Mã sản phẩm</label>
+                    <select id="product-select-${cam.id}" class="modern-select" onchange="switchProduct('${cam.id}', this.value)">
+                        <option value="">Đang tải mã hàng...</option>
+                    </select>
+                </div>
+
+                <!-- Thanh trạng thái được trang trí lại và đưa lên trên -->
+                <div class="status-banner">
+                    <div class="status-icon">🔔</div>
+                    <div id="status-msg-${cam.id}" class="status-text">Hệ thống sẵn sàng</div>
+                </div>
+
+                <div class="progress-section">
+                    <div id="step-name-${cam.id}" class="current-step-title">Đang chờ bắt đầu...</div>
+                    <div class="progress-bar"><div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+
+                <div class="sop-section" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                    <div class="panel-title">Quy trình thực hiện (SOP)</div>
+                    <div id="sop-list-${cam.id}" class="sop-steps-checklist" style="flex: 1;"></div>
+                </div>
             </div>
         </div>
     `;
+    
+    // Khởi tạo các thành phần
+    initProductSelector(cam.id, cam.engine_id);
+    renderSopChecklist(cam.id);
+}
+
+/**
+ * Vẽ danh sách các bước SOP (Checklist)
+ */
+async function renderSopChecklist(cameraId) {
+    const list = document.getElementById('sop-list-' + cameraId);
+    if (!list) return;
+
+    try {
+        const response = await fetch(`/api/station/${cameraId}/sop`);
+        const steps = await response.json();
+
+        if (steps && Array.isArray(steps)) {
+            list.innerHTML = '';
+            steps.forEach((step, index) => {
+                const item = document.createElement('div');
+                item.className = 'sop-step-item';
+                item.id = `step-item-${cameraId}-${index}`;
+                item.innerHTML = `
+                    <div class="step-number">${index + 1}</div>
+                    <div class="step-info">
+                        <div class="step-name">${step.step_name || step.name}</div>
+                        <div class="step-desc">${step.logic || 'Yêu cầu thao tác tay'}</div>
+                    </div>
+                    <div class="step-status" id="step-status-${cameraId}-${index}">○</div>
+                `;
+                list.appendChild(item);
+            });
+        }
+    } catch (err) { console.error("Failed to render SOP checklist:", err); }
+}
+
+/**
+ * Khởi tạo bộ chọn mã sản phẩm
+ */
+async function initProductSelector(cameraId, currentProductId) {
+    const select = document.getElementById(`product-select-${cameraId}`);
+    if (!select) return;
+
+    try {
+        const response = await fetch('/api/products');
+        const products = await response.json();
+        
+        select.innerHTML = '';
+        products.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name;
+            if (p.id === currentProductId) opt.selected = true;
+            select.appendChild(opt);
+        });
+    } catch (err) { console.error("Failed to load products:", err); }
+}
+
+/**
+ * Chuyển đổi mã sản phẩm
+ */
+async function switchProduct(cameraId, productId) {
+    if (!productId) return;
+    
+    const statusMsg = document.getElementById(`status-msg-${cameraId}`);
+    if (statusMsg) statusMsg.innerText = "Đang chuyển đổi mã hàng...";
+
+    try {
+        const response = await fetch(`/api/station/${cameraId}/switch_product`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: productId })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            if (statusMsg) statusMsg.innerText = `Đã chuyển sang ${productId}`;
+            // Nạp lại checklist mới
+            renderSopChecklist(cameraId);
+            // Hiển thị toast thông báo
+            if (typeof showToast === 'function') showToast("Thành công", `Đã chuyển đổi sang mã hàng: ${productId}`, "success");
+        } else {
+            alert("Lỗi: " + result.error);
+        }
+    } catch (err) {
+        console.error("Switch product failed:", err);
+    }
+}
+
+/**
+ * Nạp danh sách 10 sự kiện gần nhất của một trạm cụ thể
+ */
+async function loadRecentEvents(cameraId) {
+    const list = document.getElementById('recent-list-' + cameraId);
+    if (!list) return;
+
+    try {
+        const response = await fetch(`/api/events?camera_id=${cameraId}&limit=10`);
+        const events = await response.json();
+
+        list.innerHTML = '';
+        if (events.length === 0) {
+            list.innerHTML = '<div class="text-muted p-2 text-center text-sm">Chưa có dữ liệu</div>';
+            return;
+        }
+
+        events.forEach(ev => {
+            const isViolation = ev.sop_status === 'violation';
+            const item = document.createElement('div');
+            item.className = `recent-event-item ${isViolation ? 'border-l-red-500' : 'border-l-green-500'}`;
+            item.innerHTML = `
+                <div class="flex justify-between text-xs">
+                    <span class="font-bold ${isViolation ? 'text-red-600' : 'text-green-600'}">
+                        ${isViolation ? 'VI PHẠM' : 'HOÀN THÀNH'}
+                    </span>
+                    <span class="text-slate-400">${ev.timestamp.split(' ')[1]}</span>
+                </div>
+                <div class="text-sm text-slate-700">${ev.step_detected || 'Chu kỳ SOP'}</div>
+            `;
+            list.appendChild(item);
+        });
+    } catch (err) {
+        console.error("Failed to load recent events:", err);
+    }
+}
+
+/**
+ * Hiển thị thông báo Toast
+ */
+function showToast(title, message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    const now = new Date();
+    const timeStr = now.getHours().toString().padStart(2, '0') + ':' + 
+                    now.getMinutes().toString().padStart(2, '0') + ':' + 
+                    now.getSeconds().toString().padStart(2, '0');
+
+    toast.innerHTML = `
+        <div class="toast-header">
+            <span class="toast-title">${title}</span>
+            <span class="toast-time">${timeStr}</span>
+        </div>
+        <div class="toast-body">${message}</div>
+    `;
+
+    container.appendChild(toast);
+
+    // Tự động xóa sau 5 giây
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => toast.remove(), 500);
+    }, 5000);
 }
 
 // Socket IO logic giữ nguyên
 socket.on('step_update', (data) => {
-    const { camera_id, cycle_count, current_step, status_msg, progress_percent } = data;
+    const { camera_id, cycle_count, current_step, status_msg, progress_percent, step_index } = data;
+    
+    // Cập nhật Progress Bar & Tiêu đề
     const fill = document.getElementById(`progress-${camera_id}`);
     const label = document.getElementById(`step-name-${camera_id}`);
     const cycle = document.getElementById(`cycle-count-${camera_id}`);
+    const statusFooter = document.getElementById(`status-msg-${camera_id}`);
+    const statusIndicator = document.getElementById(`status-${camera_id}`);
+
     if (fill) fill.style.width = `${progress_percent}%`;
     if (label) label.innerText = current_step;
     if (cycle) cycle.innerText = cycle_count;
+    if (statusFooter) statusFooter.innerText = status_msg;
+    
+    // Đổi màu indicator nếu đang chạy
+    if (statusIndicator) {
+        statusIndicator.innerText = "STREAMING";
+        statusIndicator.style.background = "#dcfce7";
+        statusIndicator.style.color = "#15803d";
+    }
+
+    // --- LOGIC TÍCH CHỌN CHECKLIST ---
+    if (step_index !== undefined) {
+        // Lấy tất cả các item trong checklist của trạm này
+        const steps = document.querySelectorAll(`[id^="step-item-${camera_id}-"]`);
+        
+        steps.forEach((el, idx) => {
+            const statusIcon = document.getElementById(`step-status-${camera_id}-${idx}`);
+            
+            // Xóa hết trạng thái cũ
+            el.classList.remove('active', 'completed');
+            
+            if (idx < step_index) {
+                // Các bước đã hoàn thành
+                el.classList.add('completed');
+                if (statusIcon) {
+                    statusIcon.innerHTML = '✓';
+                    statusIcon.style.color = '#10b981'; // Màu xanh lá
+                }
+            } else if (idx === step_index) {
+                // Bước đang thực hiện
+                el.classList.add('active');
+                if (statusIcon) {
+                    statusIcon.innerHTML = '▶';
+                    statusIcon.style.color = '#3b82f6'; // Màu xanh dương
+                }
+                
+                // TỰ ĐỘNG CUỘN ĐẾN BƯỚC NÀY
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                // Các bước chưa tới
+                if (statusIcon) {
+                    statusIcon.innerHTML = '○';
+                    statusIcon.style.color = '#cbd5e1';
+                }
+            }
+        });
+    }
 });
 
 /* --- SPA NAVIGATION LOGIC --- */
@@ -305,30 +538,30 @@ function initSpaNavigation() {
 async function loadPage(path, push = true) {
     const mainArea = document.getElementById('main-content-area');
     if (!mainArea) return;
-    
+
     mainArea.style.opacity = '0.5'; // Làm mờ nhẹ khi đang tải
-    
+
     try {
         const response = await fetch(path);
         const text = await response.text();
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
         const newContent = doc.getElementById('main-content-area');
-        
+
         if (newContent) {
             if (push) history.pushState({ path }, '', path);
             mainArea.innerHTML = newContent.innerHTML;
-            
+
             // Cập nhật trạng thái Active trên Sidebar
             updateSidebarActiveState(path);
-            
+
             await initDashboard(); // Nạp lại dữ liệu cho trang mới
             initSpaNavigation();
             mainArea.style.opacity = '1';
         }
-    } catch (err) { 
+    } catch (err) {
         console.error("SPA Load failed, falling back to normal navigation:", err);
-        window.location.href = path; 
+        window.location.href = path;
     }
 }
 
@@ -340,10 +573,10 @@ function updateSidebarActiveState(path) {
         if (!link) return;
         const href = link.getAttribute('href');
         // Logic nhận diện path linh hoạt (hỗ trợ cả tab-id hoặc url path)
-        const isActive = (href === path) || 
-                         (path === '/' && href === '/sop') ||
-                         (path.includes(href) && href !== '/');
-                         
+        const isActive = (href === path) ||
+            (path === '/' && href === '/sop') ||
+            (path.includes(href) && href !== '/');
+
         if (isActive) {
             link.classList.add('bg-primary/10', 'text-primary');
             link.classList.remove('text-slate-600', 'hover:bg-slate-50');
@@ -361,5 +594,26 @@ async function updateSystemHealth() {
         if (document.getElementById('cpu-val')) document.getElementById('cpu-val').innerText = `${data.cpu_usage_percent}%`;
         if (document.getElementById('ram-val')) document.getElementById('ram-val').innerText = `${data.ram_used_mb} MB`;
         if (document.getElementById('disk-val')) document.getElementById('disk-val').innerText = `${data.disk_free_gb} GB Free`;
-    } catch (err) {}
+    } catch (err) { }
 }
+
+// --- LẮNG NGHE THÔNG BÁO VI PHẠM (DẠNG TOAST) ---
+socket.on('violation', (data) => {
+    const { camera_id, violation_type, expected_step, detected_step, timestamp, clip_path } = data;
+    
+    // 1. Hiện thông báo Toast đỏ cực rõ
+    if (typeof showToast === 'function') {
+        showToast(
+            "PHÁT HIỆN VI PHẠM!", 
+            `Trạm ${camera_id}: ${violation_type}. Yêu cầu bước: ${expected_step}`, 
+            "danger"
+        );
+    }
+    
+    // 2. Hiệu ứng rung đỏ khung hình video
+    const card = document.getElementById(`station-${camera_id}`);
+    if (card) {
+        card.classList.add('violation-active');
+        setTimeout(() => card.classList.remove('violation-active'), 3000);
+    }
+});

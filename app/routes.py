@@ -278,3 +278,26 @@ def switch_product(camera_id):
         return jsonify({"success": True, "message": f"Switched to {product['name']}"})
     else:
         return jsonify({"success": False, "error": "Engine failed to switch"}), 500
+
+
+@app.route('/api/station/<camera_id>/sop')
+def get_station_sop(camera_id):
+    """Lấy danh sách các bước SOP hiện tại của trạm."""
+    config = ConfigLoader.load_config()
+    camera = next((c for c in config.get("cameras", []) if c['id'] == camera_id), None)
+    
+    if not camera:
+        return jsonify({"error": "Camera not found"}), 404
+        
+    sop_file = camera.get('sop_file')
+    if not sop_file:
+        return jsonify([])
+        
+    try:
+        # Load trực tiếp từ file YAML để đảm bảo luôn có dữ liệu nạp cho Checklist
+        sop_def = ConfigLoader.load_yaml(sop_file)
+        steps = sop_def.get("steps", [])
+        return jsonify(steps)
+    except Exception as e:
+        logger.error(f"Failed to load SOP file {sop_file}: {e}")
+        return jsonify([])
