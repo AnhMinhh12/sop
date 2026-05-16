@@ -1,33 +1,65 @@
 import cv2
 import numpy as np
+import yaml
+import os
 
 # --- CẤU HÌNH ---
-# Bạn hãy để file ảnh muốn chọn vùng vào đây (VD: snapshot.jpg)
+CONFIG_PATH = os.path.join("..", "..", "config", "config.yaml")
 IMAGE_PATH = "test.jpg" 
-VIDEO_SOURCE = "video_test.mp4" # Dự phòng nếu không có ảnh
-window_name = "Polygon Zone Selector (Image Mode)"
+VIDEO_SOURCE_FALLBACK = "video_test.mp4" 
+window_name = "Polygon Zone Selector (Real Camera Mode)"
 
-print("--- POLYGON ZONE SELECTOR (CHỌN VÙNG TRÊN ẢNH) ---")
+def get_rtsp_from_config(config_path):
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
+            cameras = cfg.get('cameras', [])
+            if cameras:
+                return cameras[0].get('rtsp_url')
+    except Exception as e:
+        print(f"[!] Khong the doc file cau hinh: {e}")
+    return None
+
+print("--- POLYGON ZONE SELECTOR (CHON VUNG TREN CAMERA THUC TE) ---")
 print("HDSD:")
-print("1. Click chuột trái 4 LẦN để chọn 4 góc của vùng.")
-print("2. Nhấn 's' để LƯU vùng (tọa độ sẽ in ra console).")
-print("3. Nhấn 'c' để XÓA các điểm đang chọn.")
-print("4. Nhấn 'q' để THOÁT.")
+print("1. Click chuot trai 4 LAN de chon 4 goc cua vung.")
+print("2. Nhan 's' de LUU vung (toa do se in ra console).")
+print("3. Nhan 'c' de XOA cac diem dang chon.")
+print("4. Nhan 'q' de THOAT.")
 
 # --- LOAD NGUỒN DỮ LIỆU ---
-frame = cv2.imread(IMAGE_PATH)
+frame = None
 
+# 1. Thu lay tu Camera thuc te truoc
+rtsp_url = get_rtsp_from_config(CONFIG_PATH)
+if rtsp_url:
+    print(f"[*] Dang ket noi toi Camera thuc te: {rtsp_url}")
+    cap = cv2.VideoCapture(rtsp_url)
+    if cap.isOpened():
+        # Doc bo qua vai frame dau de tranh buffer cu
+        for _ in range(15): cap.read()
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            print("[+] Da chup duoc anh thuc te tu Camera.")
+        else:
+            print("[!] Ket noi duoc nhung khong lay duoc frame.")
+    else:
+        print("[-] Khong the mo stream RTSP.")
+
+# 2. Du phong neu camera loi hoac khong co config
 if frame is None:
-    print(f"⚠️ Không tìm thấy ảnh tại: {IMAGE_PATH}")
-    print(f"🎬 Đang thử mở video dự phòng: {VIDEO_SOURCE}")
-    cap = cv2.VideoCapture(VIDEO_SOURCE)
-    ret, frame = cap.read()
-    if not ret:
-        print("❌ LỖI: Không thể mở được cả ảnh và video. Vui lòng kiểm tra lại đường dẫn!")
-        exit()
-    cap.release()
-else:
-    print(f"✅ Đã load ảnh: {IMAGE_PATH}")
+    frame = cv2.imread(IMAGE_PATH)
+    if frame is not None:
+        print(f"[+] Da load anh du phong: {IMAGE_PATH}")
+    else:
+        print(f"[*] Dang thu mo video du phong: {VIDEO_SOURCE_FALLBACK}")
+        cap = cv2.VideoCapture(VIDEO_SOURCE_FALLBACK)
+        ret, frame = cap.read()
+        if not ret:
+            print("[!] LOI: Khong the mo duoc ca Camera, Anh hay Video. Vui long kiem tra lai cau hinh!")
+            exit()
+        cap.release()
 
 h, w = frame.shape[:2]
 current_points = []
@@ -38,7 +70,7 @@ def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         if len(current_points) < 4:
             current_points.append((x, y))
-            print(f"📍 Điểm {len(current_points)}: ({x}, {y})")
+            print(f"[*] Diem {len(current_points)}: ({x}, {y})")
 
 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 cv2.resizeWindow(window_name, 1280, 720)
@@ -70,11 +102,11 @@ while True:
     cv2.imshow(window_name, temp_frame)
     key = cv2.waitKey(1) & 0xFF
 
-    # Nhấn 's' để lưu tọa độ
+    # Nhan 's' de luu toa do
     if key == ord('s') and len(current_points) == 4:
-        # MỚI: Cho phép nhập tên vùng để đỡ phải sửa tay trong YAML
+        # MOI: Cho phep nhap ten vung de do phai sua tay trong YAML
         print("\n" + "-"*30)
-        zone_name = input("📝 Nhập tên vùng (VD: middle_table, mold...): ").strip()
+        zone_name = input("Nhap ten vung (VD: middle_table, mold...): ").strip()
         if not zone_name: 
             zone_name = f"zone_{len(all_polygons)+1}"
         
@@ -85,23 +117,23 @@ while True:
             "pixel_points": list(current_points)
         })
         
-        print(f"✅ ĐÃ LƯU '{zone_name}': {rel_points}")
+        print(f"[+] DA LUU '{zone_name}': {rel_points}")
         print("-"*30)
         current_points = []
-        print("💡 Gợi ý: Chọn tiếp vùng khác hoặc nhấn 'q' để kết thúc.")
+        print("Goi y: Chon tiep vung khac hoac nhan 'q' de ket thuc.")
 
-    # Nhấn 'c' để xóa điểm đang chọn
+    # Nhan 'c' de xoa diem dang chon
     elif key == ord('c'):
         current_points = []
-        print("🗑️ Đã xóa các điểm đang chọn.")
+        print("[x] Da xoa cac diem dang chon.")
 
     # Nhấn 'q' để thoát
     elif key == ord('q'):
         break
 
-# In kết quả cuối cùng để copy vào YAML
+# In ket qua cuoi cung de copy vao YAML
 print("\n" + "="*60)
-print("DANH SÁCH TỌA ĐỘ (Copy dán trực tiếp dưới mục 'zones:' trong YAML):")
+print("DANH SACH TOA DO (Copy dan truc tiep duoi muc 'zones:' trong YAML):")
 print("="*60)
 for item in all_polygons:
     print(f"  {item['name']}: {item['points']}")
