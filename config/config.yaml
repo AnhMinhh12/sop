@@ -5,9 +5,9 @@ server:
   secret_key: "default-secret-key-change-me"
 
 products:
-  - id: "san_pham_a"
-    name: "Sản phẩm A"
-    sop_file: "projects/sop_monitoring/config/san_pham_a.yaml"
+  - id: "TFF4040"
+    name: "TFF4040"
+    sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
 
 inference:
   device: "cpu"
@@ -17,7 +17,7 @@ inference:
 
 models:
   yolo:
-    weights: "shared/models/yolo/san_pham_a.onnx"
+    weights: "shared/models/yolo/TFF4040_full.onnx"
     input_size: 416
     fps_cap: 15
     conf_threshold: 0.25
@@ -36,8 +36,8 @@ cameras:
     illustration: "/static/illustration/may_7.png"
     rtsp_url: "D:/Apps/SOP_HTMP/random.mp4"
     #rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
-    sop_file: "projects/sop_monitoring/config/san_pham_a.yaml"
-    engine_id: "san_pham_a"
+    sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
+    engine_id: "TFF4040"
     resolution: [640, 480]
     fps_cap: 15
 
