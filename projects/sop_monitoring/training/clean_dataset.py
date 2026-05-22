@@ -3,73 +3,71 @@ import shutil
 import random
 import cv2
 import yaml
+import logging
+import argparse
 from pathlib import Path
+from typing import List, Tuple, Dict
 
-# Cấu hình các đường dẫn nguồn
-TAY_NGAN_DIR = Path("data/training_collection/extracted_data/images")
-TAY_DAI_DIR = Path("projects/sop_monitoring/training/dataset tay dai")
-OUTPUT_DIR = Path("projects/sop_monitoring/training/dataset hop nhat")
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-TRAIN_RATIO = 0.8
-SEED = 42
-
-def validate_yolo_label(label_path: Path) -> bool:
+class ProductDatasetPreparer:
     """
-    Kiem tra tinh hop le cua file nhan YOLO.
-    Dinh dang: class_id x_center y_center width height
+    Validates, splits, and packages YOLO datasets for specific product codes
+    without overwriting other products.
     """
-    try:
-        if not label_path.exists() or label_path.stat().st_size == 0:
+    def __init__(self, base_source_dir: Path, output_base_dir: Path, train_ratio: float = 0.8, seed: int = 42):
+        self.base_source_dir = base_source_dir
+        self.output_base_dir = output_base_dir
+        self.train_ratio = train_ratio
+        self.seed = seed
+        
+    def validate_yolo_label(self, label_path: Path) -> bool:
+        """
+        Validates the format and values of a YOLO label file (class 0, coords between 0 and 1).
+        """
+        try:
+            if not label_path.exists() or label_path.stat().st_size == 0:
+                return False
+                
+            with open(label_path, 'r', encoding='utf-8') as f:
+                lines = f.read().strip().split('\n')
+                
+            valid_lines = 0
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) != 5:
+                    continue
+                    
+                class_id = int(parts[0])
+                coords = [float(x) for x in parts[1:]]
+                
+                # Class 0 is expected for hand detection
+                if class_id != 0:
+                    continue
+                    
+                # Coordinates must be normalized between 0.0 and 1.0
+                if all(0.0 <= c <= 1.0 for c in coords):
+                    valid_lines += 1
+                    
+            return valid_lines > 0
+        except Exception as e:
+            logger.debug(f"Error validating label {label_path}: {e}")
             return False
-            
-        with open(label_path, 'r') as f:
-            lines = f.read().strip().split('\n')
-            
-        valid_lines = 0
-        for line in lines:
-            parts = line.strip().split()
-            if len(parts) != 5:
-                continue
-                
-            class_id = int(parts[0])
-            coords = [float(x) for x in parts[1:]]
-            
-            # Chỉ chấp nhận class 0 (hand)
-            if class_id != 0:
-                continue
-                
-            # Kiểm tra tọa độ normalized phải thuộc [0, 1]
-            if all(0.0 <= c <= 1.0 for c in coords):
-                valid_lines += 1
-                
-        return valid_lines > 0
-    except Exception:
-        return False
 
-def clean_and_merge_datasets():
-    """
-    Quét và gộp cả hai tập dữ liệu tay ngắn & tay dài, loại bỏ ảnh/nhãn lỗi,
-    sau đó phân chia Train/Val 80/20 lưu vào thư mục 'dataset hop nhat'.
-    """
-    random.seed(SEED)
-    print("=== BAT DAU GOP VA CHUAN BI DU LIEU TAY NGAN & TAY DAI ===")
-    
-    # 0. Xóa sạch thư mục cũ nếu có để tránh nhiễu
-    if OUTPUT_DIR.exists():
-        print(f"Purging old output directory: {OUTPUT_DIR}")
-        shutil.rmtree(OUTPUT_DIR)
+    def scan_folder(self, folder_path: Path) -> List[Tuple[Path, Path]]:
+        """
+        Scans a directory for matching, valid image-label pairs.
+        """
+        valid_pairs = []
+        corrupted_images = 0
+        mismatched_files = 0
+        invalid_labels = 0
         
-    valid_pairs = [] # List of tuples: (image_path, label_path, prefix)
-    corrupted_images = 0
-    mismatched_files = 0
-    invalid_labels = 0
-
-    # 1. Quét dữ liệu tay ngắn (Short sleeves)
-    tay_ngan_count = 0
-    if TAY_NGAN_DIR.exists():
-        print(f"\n1. Quet du lieu tay ngan tai: {TAY_NGAN_DIR}")
-        all_files = list(TAY_NGAN_DIR.glob("*"))
-        image_files = [f for f in all_files if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+        all_files = list(folder_path.glob("*"))
+        image_extensions = ['.jpg', '.jpeg', '.png']
+        image_files = [f for f in all_files if f.suffix.lower() in image_extensions]
         
         for img_path in image_files:
             txt_path = img_path.with_suffix('.txt')
@@ -82,104 +80,138 @@ def clean_and_merge_datasets():
                 corrupted_images += 1
                 continue
                 
-            if not validate_yolo_label(txt_path):
+            if not self.validate_yolo_label(txt_path):
                 invalid_labels += 1
                 continue
                 
-            valid_pairs.append((img_path, txt_path, "tay_ngan"))
-            tay_ngan_count += 1
-        print(f"   -> Tim thay {tay_ngan_count} cap tay ngan hop le.")
-    else:
-        print(f"\n[CANH BAO] Khong tim thay thu muc tay ngan tai: {TAY_NGAN_DIR}")
-
-    # 2. Quét dữ liệu tay dài (Long sleeves)
-    tay_dai_count = 0
-    if TAY_DAI_DIR.exists():
-        print(f"\n2. Quet du lieu tay dai tai: {TAY_DAI_DIR}")
-        all_files = list(TAY_DAI_DIR.glob("*"))
-        image_files = [f for f in all_files if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
-        
-        for img_path in image_files:
-            txt_path = img_path.with_suffix('.txt')
-            if not txt_path.exists():
-                mismatched_files += 1
-                continue
-                
-            img = cv2.imread(str(img_path))
-            if img is None:
-                corrupted_images += 1
-                continue
-                
-            if not validate_yolo_label(txt_path):
-                invalid_labels += 1
-                continue
-                
-            valid_pairs.append((img_path, txt_path, "tay_dai"))
-            tay_dai_count += 1
-        print(f"   -> Tim thay {tay_dai_count} cap tay dai hop le.")
-    else:
-        print(f"\n[CANH BAO] Khong tim thay thu muc tay dai tai: {TAY_DAI_DIR}")
-
-    # Báo cáo lọc
-    print(f"\n--- BAO CAO LOC DU LIEU GOP ---")
-    print(f"   - Tong so cap anh-nhan HOP LE: {len(valid_pairs)} (Tay ngan: {tay_ngan_count}, Tay dai: {tay_dai_count})")
-    print(f"   - So anh bi loi/khong doc duoc: {corrupted_images}")
-    print(f"   - So anh/nhan thieu file ghep cap: {mismatched_files}")
-    print(f"   - So file nhan sai dinh dang YOLO/toa do loi: {invalid_labels}")
-
-    if len(valid_pairs) == 0:
-        print("\n[LOI] Khong co du lieu hop le nao de phan chia! Vui long kiem tra lai.")
-        return
-
-    # 3. Phân chia tập dữ liệu (Train/Val Split)
-    random.shuffle(valid_pairs)
-    split_idx = int(len(valid_pairs) * TRAIN_RATIO)
-    train_pairs = valid_pairs[:split_idx]
-    val_pairs = valid_pairs[split_idx:]
-
-    print(f"\n3. Phan chia ti le {int(TRAIN_RATIO*100)}/{int((1-TRAIN_RATIO)*100)}:")
-    print(f"   - Tap Huan luyen (Train): {len(train_pairs)} anh")
-    print(f"   - Tap Kiem thu (Val): {len(val_pairs)} anh")
-
-    # 4. Tạo cấu trúc thư mục YOLO
-    print(f"\n4. Dang khoi tao cau truc thu muc tai: {OUTPUT_DIR}")
-    for split in ['train', 'val']:
-        (OUTPUT_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
-        (OUTPUT_DIR / "labels" / split).mkdir(parents=True, exist_ok=True)
-
-    # 5. Sao chép và đổi tên file để tránh trùng lặp
-    print("\n5. Dang sao chep file...")
-    for split, pairs in [('train', train_pairs), ('val', val_pairs)]:
-        for i, (img_path, txt_path, prefix) in enumerate(pairs):
-            new_filename = f"hand_{prefix}_{i:06d}"
-            dest_img = OUTPUT_DIR / "images" / split / f"{new_filename}{img_path.suffix}"
-            dest_txt = OUTPUT_DIR / "labels" / split / f"{new_filename}.txt"
+            valid_pairs.append((img_path, txt_path))
             
-            shutil.copy(img_path, dest_img)
-            shutil.copy(txt_path, dest_txt)
+        logger.info(f"Folder: {folder_path.name}")
+        logger.info(f"  - Valid pairs: {len(valid_pairs)}")
+        logger.info(f"  - Missing label or image files: {mismatched_files}")
+        logger.info(f"  - Corrupted images: {corrupted_images}")
+        logger.info(f"  - Invalid label files: {invalid_labels}")
+        
+        return valid_pairs
 
-    # 6. Tạo file cấu hình dataset.yaml
-    print("\n6. Khoi tao file cau hinh dataset.yaml...")
-    abs_path = os.path.abspath(OUTPUT_DIR).replace("\\", "/")
-    yaml_data = {
-        'path': abs_path,
-        'train': 'images/train',
-        'val': 'images/val',
-        'names': {
-            0: 'hand'
+    def process(self, code: str) -> None:
+        """
+        Processes dataset for a specific product code (or merges all if code is 'merge').
+        """
+        random.seed(self.seed)
+        logger.info(f"=== STARTING DATASET PREPARATION FOR CODE: {code} ===")
+        
+        # 1. Determine directories to scan
+        folders_to_scan: List[Path] = []
+        
+        if code.lower() in ['merge', 'all', 'hopnhat']:
+            # Scan all subdirectories
+            if not self.base_source_dir.exists():
+                logger.error(f"Source directory does not exist: {self.base_source_dir}")
+                return
+            subdirs = [d for d in self.base_source_dir.iterdir() if d.is_dir()]
+            folders_to_scan.extend(subdirs)
+            output_name = "dataset_hop_nhat"
+        else:
+            # Scan only the folder corresponding to the product code
+            target_folder = self.base_source_dir / code
+            if not target_folder.exists() or not target_folder.is_dir():
+                logger.error(f"Dataset folder for code '{code}' does not exist at: {target_folder}")
+                available = [d.name for d in self.base_source_dir.iterdir() if d.is_dir()]
+                logger.error(f"Available codes: {available}")
+                return
+            folders_to_scan.append(target_folder)
+            output_name = f"dataset_{code}"
+            
+        if not folders_to_scan:
+            logger.error("No dataset directories to scan!")
+            return
+            
+        logger.info(f"Scanning folders: {[f.name for f in folders_to_scan]}")
+        
+        # 2. Collect valid pairs
+        all_valid_pairs: List[Tuple[Path, Path, str]] = []
+        for folder in folders_to_scan:
+            valid_pairs = self.scan_folder(folder)
+            for img_path, txt_path in valid_pairs:
+                all_valid_pairs.append((img_path, txt_path, folder.name))
+                
+        logger.info(f"Total valid pairs collected: {len(all_valid_pairs)}")
+        if not all_valid_pairs:
+            logger.error("No valid data found to process!")
+            return
+            
+        # 3. Setup output folder
+        output_dir = self.output_base_dir / output_name
+        if output_dir.exists():
+            logger.info(f"Purging old output directory: {output_dir}")
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 4. Split Train/Val
+        random.shuffle(all_valid_pairs)
+        split_idx = int(len(all_valid_pairs) * self.train_ratio)
+        train_pairs = all_valid_pairs[:split_idx]
+        val_pairs = all_valid_pairs[split_idx:]
+        
+        logger.info(f"Splitting data into {int(self.train_ratio*100)}/{int((1-self.train_ratio)*100)}:")
+        logger.info(f"  - Train split: {len(train_pairs)} pairs")
+        logger.info(f"  - Val split: {len(val_pairs)} pairs")
+        
+        # Create YOLO directories
+        for split in ['train', 'val']:
+            (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+            (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
+            
+        # 5. Copy files
+        logger.info("Copying and renaming dataset files...")
+        for split, pairs in [('train', train_pairs), ('val', val_pairs)]:
+            for i, (img_path, txt_path, prefix) in enumerate(pairs):
+                safe_prefix = "".join([c if c.isalnum() else "_" for c in prefix])
+                new_filename = f"hand_{safe_prefix}_{i:06d}"
+                dest_img = output_dir / "images" / split / f"{new_filename}{img_path.suffix}"
+                dest_txt = output_dir / "labels" / split / f"{new_filename}.txt"
+                
+                shutil.copy2(img_path, dest_img)
+                shutil.copy2(txt_path, dest_txt)
+                
+        # 6. Generate dataset.yaml
+        logger.info("Generating dataset.yaml...")
+        abs_path = os.path.abspath(output_dir).replace("\\", "/")
+        yaml_data = {
+            'path': abs_path,
+            'train': 'images/train',
+            'val': 'images/val',
+            'names': {
+                0: 'hand'
+            }
         }
-    }
-    
-    yaml_path = OUTPUT_DIR / "dataset.yaml"
-    with open(yaml_path, 'w', encoding='utf-8') as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
-
-    print(f"\n*** HOAN THANH GOP VA CHUAN BI DU LIEU! ***")
-    print(f"   - Thu muc dataset gop: {OUTPUT_DIR.resolve()}")
-    print(f"   - File cau hinh: {yaml_path.resolve()}")
-    print("\n>>> BUOC TIEP THEO:")
-    print("1. Nen thu muc 'dataset hop nhat' nay thanh file .zip va day len Google Drive.")
-    print("2. Chay file train_on_colab.py tren Google Colab de huan luyen model toi uu cho ca tay ngan & tay dai!")
+        yaml_path = output_dir / "dataset.yaml"
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+            
+        logger.info(f"dataset.yaml created at: {yaml_path}")
+        
+        # 7. Zip directory
+        zip_archive_base = self.output_base_dir / output_name
+        logger.info(f"Zipping to {zip_archive_base}.zip...")
+        zip_file_path = shutil.make_archive(
+            base_name=str(zip_archive_base),
+            format='zip',
+            root_dir=str(output_dir)
+        )
+        logger.info(f"✅ ZIP file created successfully: {zip_file_path}")
+        logger.info(f"=== COMPLETED PREPARING DATASET FOR {code} ===")
 
 if __name__ == "__main__":
-    clean_and_merge_datasets()
+    parser = argparse.ArgumentParser(description="Prepare dataset for a specific product code or merge all.")
+    parser.add_argument('--code', type=str, default='626287', 
+                        help="Product code to prepare (e.g. 626287). Use 'merge' to combine all folders.")
+    
+    args = parser.parse_args()
+    
+    source = Path("data/training_collection/extracted_data")
+    destination = Path("projects/sop_monitoring/training")
+    
+    preparer = ProductDatasetPreparer(base_source_dir=source, output_base_dir=destination)
+    preparer.process(args.code)

@@ -7,15 +7,18 @@ import os
 import shutil
 from pathlib import Path
 
+# 0. CẤU HÌNH MÃ SẢN PHẨM CẦN HUẤN LUYỆN
+PRODUCT_CODE = "626287"  # Thay đổi mã ở đây (ví dụ: "626287", "TFF4040")
+
 # 1. KET NOI GOOGLE DRIVE
 from google.colab import drive
 print(">>> Dang ket noi voi Google Drive...")
 drive.mount('/content/drive')
 
-# 2. CAU HINH DUONG DAN TREN GOOGLE DRIVE VA COLAB
-drive_zip_path = Path("/content/drive/MyDrive/dataset hop nhat.zip")
-drive_folder_path = Path("/content/drive/MyDrive/dataset hop nhat")
-local_dataset_path = Path("/content/dataset_hop_nhat")
+# 2. CAU HINH DUONG DAN TREN GOOGLE DRIVE VA COLAB DYNAMIC THEO MA SAN PHAM
+drive_zip_path = Path(f"/content/drive/MyDrive/dataset_{PRODUCT_CODE}.zip")
+drive_folder_path = Path(f"/content/drive/MyDrive/dataset_{PRODUCT_CODE}")
+local_dataset_path = Path(f"/content/dataset_{PRODUCT_CODE}")
 
 # 3. SAO CHEP VA GIAI NEN DU LIEU TREN COLAB
 if drive_zip_path.exists():
@@ -106,9 +109,9 @@ exported_file = Path(onnx_path)
 
 # Tạo thư mục trên Drive nếu chưa có để lưu model
 drive_folder_path.mkdir(parents=True, exist_ok=True)
-dest_file_on_drive = drive_folder_path / "TFF4040.onnx"
+dest_file_on_drive = drive_folder_path / f"{PRODUCT_CODE}.onnx"
 
 shutil.copy(exported_file, dest_file_on_drive)
 print(f"🎉 🎉 🎉 HOAN THANH!")
 print(f"Model moi da duoc luu tai Google Drive: {dest_file_on_drive}")
-print("Ban chi can vao Drive tai file 'TFF4040.onnx' ve va copy de vao models/yolo/ cua Server.")
+print(f"Ban chi can vao Drive tai file '{PRODUCT_CODE}.onnx' ve va copy de vao models/yolo/ cua Server.")
