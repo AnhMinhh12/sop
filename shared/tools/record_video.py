@@ -51,7 +51,20 @@ def main():
             cam_name = cameras[idx].get('id', 'camera')
         elif idx == len(cameras):
             source_input = input("Nhap URL RTSP hoac so ID webcam (0, 1...): ").strip()
-            # Kiem tra neu la so webcam
+            # Tự động làm sạch input nếu người dùng copy-paste từ file yaml
+            if "rtsp_url" in source_input:
+                import re
+                urls = re.findall(r'rtsp://[^\s"\']+', source_input)
+                if urls:
+                    source_input = urls[0]
+                else:
+                    parts = source_input.split(":", 1)
+                    if len(parts) > 1:
+                        source_input = parts[1].strip()
+            
+            # Loại bỏ dấu nháy kép hoặc đơn thừa ở hai đầu
+            source_input = source_input.strip('"').strip("'")
+            
             if source_input.isdigit():
                 source = int(source_input)
             else:
@@ -95,8 +108,12 @@ def main():
     show_preview = preview_input != 'n'
 
     # 4. Ket noi camera (Ep buoc su dung RTSP over TCP de tranh mat goi tin gay loi decode H264)
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-    print(f"\n⏳ Dang ket noi toi: {source} (Che do RTSP TCP)...")
+    if isinstance(source, str) and source.startswith("rtsp://"):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|rw_timeout;5000000"
+    else:
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        
+    print(f"\n⏳ Dang ket noi toi: {source}...")
     
     # Neu nguon la duong dan file cuc bo (khong phai rtsp:// hay webcam index)
     if isinstance(source, str) and not source.startswith("rtsp://") and not source.startswith("http://"):
@@ -121,9 +138,45 @@ def main():
         
     print(f"🎥 Ket noi thanh cong! Resolution: {width}x{height} | FPS: {fps}")
     
-    # Khoi tao VideoWriter
+    # Khoi tao VideoWriter (Uu tien chat luong nén cao nhat de tranh mo file dau ra)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+    try:
+        out = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height), [cv2.VIDEOWRITER_PROP_QUALITY, 95])
+    except Exception:
+        out = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+    
+    import queue
+    import threading
+    
+    frame_queue = queue.Queue(maxsize=300)
+    running = True
+    connection_lost = False
+    
+    def receiver_loop():
+        nonlocal running, connection_lost
+        while running:
+            ret, frame = cap.read()
+            if not ret:
+                print("\n⚠️ Mat tin hieu tu camera!")
+                connection_lost = True
+                running = False
+                break
+            try:
+                frame_queue.put(frame, timeout=0.1)
+            except queue.Full:
+                # Nếu hàng đợi đầy, bỏ bớt frame cũ nhất để đảm bảo realtime
+                try:
+                    frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    frame_queue.put_nowait(frame)
+                except queue.Full:
+                    pass
+
+    # Chạy luồng đọc tin hiệu camera riêng biệt
+    recv_thread = threading.Thread(target=receiver_loop, daemon=True)
+    recv_thread.start()
     
     print("\n" + "="*50)
     print("🔴 DANG QUAY VIDEO...")
@@ -144,13 +197,15 @@ def main():
         cv2.resizeWindow("Record Preview (Press 'q' to stop)", 800, 600)
     
     try:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("⚠️ Mat tin hieu tu camera!")
-                break
+        while running:
+            try:
+                frame = frame_queue.get(timeout=0.1)
+            except queue.Empty:
+                if connection_lost:
+                    break
+                continue
                 
-            # Ghi frame
+            # Ghi frame xuống đĩa ở luồng ghi riêng (luồng chính)
             out.write(frame)
             frame_count += 1
             
@@ -159,24 +214,35 @@ def main():
                 cv2.imshow("Record Preview (Press 'q' to stop)", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     print("⏹️ Nguoi dung yeu cau dung quay.")
+                    running = False
                     break
-            else:
-                # CPU relief when preview is disabled
-                time.sleep(0.001)
                 
             # Kiem tra thoi gian
             elapsed = time.time() - start_time
             if max_duration and elapsed >= max_duration:
                 print(f"⏱️ Da dat thoi gian gioi han: {max_duration} giay.")
+                running = False
                 break
                 
             # Cap nhat log giam sat
             if frame_count % 30 == 0:
-                print(f"   Recorded: {frame_count} frames | Elapsed: {elapsed:.1f}s", end="\r")
+                print(f"   Recorded: {frame_count} frames | Queue: {frame_queue.qsize()} | Elapsed: {elapsed:.1f}s", end="\r")
+                
+        # Xử lý nốt các frame còn sót lại trong hàng đợi sau khi dừng luồng đọc
+        print("\n⏳ Dang ghi not cac frame con lai trong hang doi...")
+        while not frame_queue.empty():
+            try:
+                frame = frame_queue.get_nowait()
+                out.write(frame)
+                frame_count += 1
+            except queue.Empty:
+                break
                 
     except KeyboardInterrupt:
         print("\n⏹️ Nguoi dung dung chuong trinh.")
+        running = False
     finally:
+        running = False
         # Don dep tai nguyen
         cap.release()
         out.release()
