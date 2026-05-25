@@ -30,24 +30,32 @@ print("4. Nhan 'q' de THOAT.")
 # --- LOAD NGUỒN DỮ LIỆU ---
 frame = None
 
-# 1. Thu lay tu Camera thuc te truoc
-rtsp_url = get_rtsp_from_config(CONFIG_PATH)
+# 1. Lay tu config de lam goi y mac dinh
+rtsp_default = get_rtsp_from_config(CONFIG_PATH)
+if not rtsp_default:
+    rtsp_default = VIDEO_SOURCE_FALLBACK
+
+print(f"[*] Nguon mac dinh tu config: {rtsp_default}")
+user_input_source = input(f"Nhap duong dan RTSP hoac file video (Nhan Enter de dung '{rtsp_default}'): ").strip()
+rtsp_url = user_input_source if user_input_source else rtsp_default
+
 if rtsp_url:
-    print(f"[*] Dang ket noi toi Camera thuc te: {rtsp_url}")
+    print(f"[*] Dang ket noi toi: {rtsp_url}")
     cap = cv2.VideoCapture(rtsp_url)
     if cap.isOpened():
         # Doc bo qua vai frame dau de tranh buffer cu
-        for _ in range(15): cap.read()
+        for _ in range(15): 
+            cap.read()
         ret, frame = cap.read()
         cap.release()
         if ret:
-            print("[+] Da chup duoc anh thuc te tu Camera.")
+            print("[+] Da chup duoc anh tu nguon da chon.")
         else:
             print("[!] Ket noi duoc nhung khong lay duoc frame.")
     else:
-        print("[-] Khong the mo stream RTSP.")
+        print(f"[-] Khong the mo nguon: {rtsp_url}")
 
-# 2. Du phong neu camera loi hoac khong co config
+# 2. Du phong neu camera loi
 if frame is None:
     frame = cv2.imread(IMAGE_PATH)
     if frame is not None:
