@@ -72,7 +72,7 @@
            MediaPipe          State Machine          SocketIO
            (CPU ONNX)           (CPU PyTorch)       MJPEG stream
                                                     Audio Alert
-                                                    SQLite WAL
+                                                     MySQL Pool
                                                          │
                                           [Trình duyệt LAN]
                                       PC giám sát / Tablet / PC khác
@@ -115,7 +115,7 @@ SOP State Machine
     │
     └── Vi phạm → ViolationHandler
                     ├── Lưu clip video 10–30s (buffer pre/post event)
-                    ├── Lưu event vào SQLite
+                    ├── Lưu event vào MySQL
                     ├── Phát âm thanh cảnh báo (sounddevice)
                     └── Emit SocketIO → dashboard real-time
 ```
@@ -140,95 +140,55 @@ class InferenceEngine:
 
 ---
 
-## 4. Cấu trúc thư mục dự án (theo chuẩn repo công ty)
+## 4. Cấu trúc thư mục dự án (theo chuẩn repo thực tế)
 
 ```
-sop_monitoring/
-├── .github/
-│   └── workflows/                   # CI/CD workflows
-├── app/                             # Flask server, routes, frontend
-│   ├── __init__.py
-│   ├── app.py                       # Flask app chính + khởi động hệ thống
-│   ├── api_routes.py                # REST API endpoints
-│   ├── socketio_events.py           # SocketIO emit events
-│   ├── templates/
-│   │   ├── index.html               # Dashboard đa trạm
-│   │   ├── station.html             # Chi tiết 1 trạm
-│   │   ├── history.html             # Lịch sử vi phạm + clip
-│   │   └── stats.html               # Thống kê compliance rate
-│   └── static/
-│       ├── css/style.css
-│       └── js/
-│           ├── dashboard.js         # SocketIO client, update UI real-time
-│           ├── charts.js            # Chart.js biểu đồ thống kê
-│           └── player.js            # Video clip player
-├── core/                            # Core AI & SOP logic
-│   ├── __init__.py
-│   ├── lstm_model.py                # Kiến trúc LSTM (PyTorch)
-│   ├── step_classifier.py           # Sliding window + inference
-│   ├── feature_engineer.py          # Normalize keypoints → 63-dim vector
-│   ├── state_machine.py             # SOP State Machine (config-driven)
-│   └── violation_detector.py        # Phân loại loại vi phạm
-├── db/                              # Database layer
-│   ├── __init__.py
-│   ├── db.py                        # SQLite connection + WAL mode
-│   ├── models.py                    # Schema + CREATE TABLE
-│   ├── queries.py                   # Insert / Select thường dùng
-│   └── cleanup.py                   # ⭐ Auto-xóa clip cũ khi disk > 85%
-├── events/                          # Event handling & alerts
-│   ├── __init__.py
-│   ├── audio_alert.py               # Phát âm thanh cảnh báo qua loa
-│   └── clip_saver.py                # Cắt và lưu clip video 10–30s
-├── integrations/                    # External integrations (camera, models)
-│   ├── __init__.py
-│   ├── rtsp_stream.py               # Đọc RTSP, decode frame, pre-buffer
-│   ├── hand_detector.py             # YOLOv11n wrapper (ONNX CPU)
-│   └── keypoint_extractor.py        # MediaPipe Hands wrapper (CPU)
-├── pipelines/                       # Processing pipelines
-│   ├── __init__.py
-│   ├── inference_engine.py          # ⭐ CPU inference engine (1 model ONNX, N camera)
-│   ├── frame_buffer.py              # Ring buffer lưu N giây gần nhất (cho clip)
-│   └── frame_processor.py           # Pipeline per camera (thread)
-├── services/                        # Shared services & utilities
-│   ├── __init__.py
-│   ├── config_loader.py             # Load + validate config.yaml
-│   ├── disk_monitor.py              # ⭐ Giám sát dung lượng ổ SSD
-│   ├── logger.py                    # Logging utility
-│   └── annotator.py                 # Vẽ bbox, keypoints, step label lên frame
-├── config/
-│   ├── config.yaml                  # Cấu hình toàn hệ thống
-│   └── sop_definitions/
-│       ├── station_01.yaml          # Định nghĩa SOP trạm 1
-│       ├── station_02.yaml
-│       └── ...
-├── models/
-│   ├── yolo/hand_detector.onnx      # YOLOv11n weights (ONNX format cho CPU)
-│   └── lstm/
-│       ├── step_classifier.pt       # LSTM weights
-│       └── label_map.json           # index → tên bước SOP
-├── training/
-│   ├── collect_data.py              # Quay video + gán nhãn thủ công
-│   ├── manual_tagger.py             # Gán nhãn thủ công từng bước SOP
-│   ├── extract_frames.py            # Video → frames cho YOLO dataset
-│   ├── train_yolo.py                # Train YOLOv11n (trên máy có GPU hoặc Colab)
-│   ├── export_onnx.py               # Export YOLO .pt → .onnx cho CPU inference
-│   ├── extract_keypoints.py         # Video → keypoint sequences → .npy
-│   ├── train_lstm.py                # Train LSTM classifier
-│   └── evaluate.py                  # Đánh giá model trên test set
-├── tests/
-│   ├── test_inference_engine.py
-│   ├── test_state_machine.py
-│   ├── test_clip_saver.py
-│   └── test_pipeline_single.py      # Test pipeline offline với video file
-├── sounds/alert.wav                 # File âm thanh cảnh báo
-├── data/
-│   ├── violations/                  # ⭐ Clip video vi phạm (tự động quản lý)
-│   └── logs/
-├── .env.example                     # Biến môi trường mẫu
-├── .gitignore
-├── main.py                          # Entry point
-├── requirements.txt
-└── README.md
+AI_Monitoring_Hub/
+|-- app/                             # Flask server, routes, frontend
+|   |-- __init__.py
+|   |-- routes.py                    # REST API & WebSocket endpoints, page routing
+|   |-- templates/                   # Giao diện HTML (index, station, history, stats, portal)
+|   +-- static/                      # css/style.css, js/main.js
+|-- config/                          # Cấu hình dự án
+|   +-- config.yaml
+|-- projects/                        # Thư mục các dự án con
+|   +-- sop_monitoring/              # Dự án SOP Monitoring
+|       |-- core/                    # Logic phân tích và SOP engines
+|       |   |-- engines/             # Quy trình riêng của từng sản phẩm (TFF4040, 626287)
+|       |   |   |-- base_engine.py
+|       |   |   |-- loader.py
+|       |   |   |-- 626287_engine.py
+|       |   |   +-- TFF4040_engine.py
+|       |   |-- action_inference.py
+|       |   |-- sop_graph.py
+|       |   |-- spatial_engine.py
+|       |   |-- tracking_engine.py
+|       |   +-- violation_detector.py
+|       |-- docs/                    # Tài liệu đặc tả hệ thống
+|       |   |-- READING_ORDER.md
+|       |   |-- RULES.md
+|       |   +-- SOP_MONITORING_PLAN_v2.md
+|       |-- buffer.py                # Frame Ring Buffer
+|       |-- hand_detector.py         # Hand Detection wrap YOLO ONNX
+|       +-- processor.py             # Frame Processor điều phối camera stream
+|-- shared/                          # Module dùng chung cho toàn hệ thống
+|   |-- db/                          # Tầng Database MySQL
+|   |   |-- db.py                    # Cấu hình pool và bảng
+|   |   |-- queries.py               # Lớp truy vấn SQL
+|   |   +-- cleanup.py               # Daemon thread dọn dẹp ổ đĩa
+|   |-- events/                      # Xử lý âm thanh & cắt clip
+|   |   |-- audio_alert.py
+|   |   +-- clip_saver.py
+|   |-- services/                    # Dịch vụ nền
+|   |   |-- annotator.py
+|   |   |-- config_loader.py
+|   |   |-- disk_monitor.py
+|   |   +-- logger.py
+|   |-- inference_engine.py          # Singleton ONNX Inference Engine (CPU-only)
+|   +-- rtsp_manager.py              # RTSP Reconnecting Stream manager
+|-- main.py                          # Entry point khởi động ứng dụng
+|-- requirements.txt
++-- .env
 ```
 
 ---
@@ -350,85 +310,113 @@ steps:
 
 ---
 
-## 7. Schema database (SQLite WAL)
+## 7. Schema database (MySQL Pool)
 
 ```sql
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+-- 1. sop_definitions — Template quy trình SOP
+CREATE TABLE IF NOT EXISTS sop_definitions (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    name            VARCHAR(255) NOT NULL UNIQUE,
+    description     TEXT DEFAULT NULL,
+    total_steps     INT NOT NULL DEFAULT 0,
+    version         VARCHAR(20) DEFAULT '1.0',
+    is_active       TINYINT(1) DEFAULT 1,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Danh sách camera / trạm
-CREATE TABLE IF NOT EXISTS cameras (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    station_id  TEXT NOT NULL UNIQUE,
-    name        TEXT NOT NULL,
-    rtsp_url    TEXT NOT NULL,
-    status      TEXT DEFAULT 'active',   -- active | inactive | error
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Định nghĩa các bước SOP theo trạm (load từ YAML vào DB khi khởi động)
+-- 2. sop_steps — Các bước thuộc 1 definition
 CREATE TABLE IF NOT EXISTS sop_steps (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    station_id      TEXT NOT NULL,
-    step_order      INTEGER NOT NULL,
-    step_name       TEXT NOT NULL,
-    step_label      TEXT NOT NULL,       -- Khớp với label LSTM
-    max_duration_ms INTEGER,
-    is_mandatory    INTEGER DEFAULT 1
-);
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    definition_id   INT NOT NULL,
+    step_order      INT NOT NULL,
+    step_name       VARCHAR(255) NOT NULL,
+    step_label      VARCHAR(100) NOT NULL,
+    max_duration_ms INT DEFAULT NULL,
+    is_mandatory    TINYINT(1) DEFAULT 1,
+    FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE CASCADE,
+    UNIQUE(definition_id, step_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Session làm việc (1 session = 1 lần thực hiện quy trình SOP)
-CREATE TABLE IF NOT EXISTS sessions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    camera_id       INTEGER REFERENCES cameras(id),
+-- 3. sop_cameras — Camera gắn với 1 definition
+CREATE TABLE IF NOT EXISTS sop_cameras (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    station_id      VARCHAR(50) NOT NULL UNIQUE,
+    name            VARCHAR(255) NOT NULL,
+    rtsp_url        TEXT NOT NULL,
+    definition_id   INT DEFAULT NULL,
+    status          VARCHAR(20) DEFAULT 'active',
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. sop_sessions — Phiên làm việc
+CREATE TABLE IF NOT EXISTS sop_sessions (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    camera_id       INT NOT NULL,
+    definition_id   INT NOT NULL,
     start_time      DATETIME NOT NULL,
-    end_time        DATETIME,
-    total_steps     INTEGER DEFAULT 0,
-    correct_steps   INTEGER DEFAULT 0,
-    compliance_rate REAL                 -- Tính khi kết thúc session
-);
+    end_time        DATETIME DEFAULT NULL,
+    total_steps     INT DEFAULT 0,
+    correct_steps   INT DEFAULT 0,
+    compliance_rate FLOAT DEFAULT NULL,
+    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Sự kiện vi phạm SOP
-CREATE TABLE IF NOT EXISTS events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER REFERENCES sessions(id),
-    camera_id       INTEGER REFERENCES cameras(id),
+-- 5. sop_events — Sự kiện vi phạm
+CREATE TABLE IF NOT EXISTS sop_events (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id      INT DEFAULT NULL,
+    camera_id       INT NOT NULL,
+    definition_id   INT DEFAULT NULL,
     timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,
-    step_detected   TEXT NOT NULL,
-    confidence      REAL,
-    sop_status      TEXT NOT NULL,       -- correct | wrong_order | skipped | unexpected
-    violation_type  TEXT,                -- NULL nếu đúng; "wrong_order" | "skipped_step" | "repeated_step" | "timeout"
-    expected_step   TEXT,                -- Bước SOP kỳ vọng (khi sai)
-    clip_path       TEXT                 -- Đường dẫn file clip video (nếu có)
-);
+    step_detected   VARCHAR(255) NOT NULL,
+    confidence      FLOAT DEFAULT NULL,
+    sop_status      VARCHAR(50) NOT NULL,
+    violation_type  VARCHAR(100) DEFAULT NULL,
+    expected_step   VARCHAR(255) DEFAULT NULL,
+    clip_path       TEXT DEFAULT NULL,
+    FOREIGN KEY (session_id) REFERENCES sop_sessions(id) ON DELETE SET NULL,
+    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Metadata clip video vi phạm
-CREATE TABLE IF NOT EXISTS violation_clips (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id        INTEGER REFERENCES events(id),
-    camera_id       INTEGER REFERENCES cameras(id),
+-- 6. sop_clips — Clip video vi phạm
+CREATE TABLE IF NOT EXISTS sop_clips (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    event_id        BIGINT DEFAULT NULL,
+    camera_id       INT NOT NULL,
     file_path       TEXT NOT NULL,
-    file_size_mb    REAL,
-    duration_sec    INTEGER,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+    file_size_mb    FLOAT DEFAULT NULL,
+    duration_sec    INT DEFAULT NULL,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES sop_events(id) ON DELETE SET NULL,
+    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Sức khỏe hệ thống (ghi mỗi 30 giây)
-CREATE TABLE IF NOT EXISTS system_health (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    camera_id   INTEGER REFERENCES cameras(id),
-    fps         REAL,
-    latency_ms  REAL,
-    cpu_usage   REAL,                    -- % CPU usage (thay gpu_usage)
-    ram_used_mb INTEGER,                 -- RAM đang dùng (thay gpu_mem_mb)
-    disk_free_gb REAL,
-    checked_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+-- 7. sop_health — Monitor hệ thống
+CREATE TABLE IF NOT EXISTS sop_health (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    camera_id       INT NOT NULL,
+    fps             FLOAT DEFAULT NULL,
+    latency_ms      FLOAT DEFAULT NULL,
+    cpu_usage       FLOAT DEFAULT NULL,
+    ram_used_mb     INT DEFAULT NULL,
+    disk_free_gb    FLOAT DEFAULT NULL,
+    checked_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (camera_id) REFERENCES sop_cameras(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Index tăng tốc query
-CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events(camera_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-CREATE INDEX IF NOT EXISTS idx_health_time ON system_health(checked_at);
+-- --- Indexes ---
+CREATE INDEX idx_sop_events_camera_time ON sop_events(camera_id, timestamp);
+CREATE INDEX idx_sop_events_session ON sop_events(session_id);
+CREATE INDEX idx_sop_sessions_camera ON sop_sessions(camera_id);
+CREATE INDEX idx_sop_sessions_def ON sop_sessions(definition_id);
+CREATE INDEX idx_sop_health_time ON sop_health(checked_at);
+CREATE INDEX idx_sop_health_camera ON sop_health(camera_id);
+CREATE INDEX idx_sop_clips_created ON sop_clips(created_at);
+CREATE INDEX idx_sop_steps_def ON sop_steps(definition_id);
 ```
 
 ---
@@ -762,7 +750,7 @@ python training/train_lstm.py \
 | OS + phần mềm | ~60 GB | Windows Server cố định |
 | Model weights (ONNX + LSTM) | ~50 MB | Nhỏ |
 | Dataset training | ~10–30 GB | Có thể xóa sau khi train xong |
-| SQLite database | ~1–5 GB / năm | Log events + metadata |
+| MySQL database | ~1–5 GB / năm | Log events + metadata |
 | Clip vi phạm (H.264 CRF 28) | ~50–150 MB / clip | 30s @ 480p ≈ 80–120 MB |
 | **Tổng khả dụng cho clip** | ~700–750 GB | Tự động xóa clip cũ khi > 85% |
 | **Số clip lưu được** | ~5.000–9.000 clip | Rất thoải mái |

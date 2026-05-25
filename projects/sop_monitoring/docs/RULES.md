@@ -40,13 +40,13 @@ Camera RTSP → phát hiện bàn tay (YOLO ONNX CPU) → trích keypoint (Media
 - **PHẢI** có `StorageCleanup` daemon thread: kiểm tra mỗi 10 phút, xóa clip cũ nhất khi disk > 85%
 - Clip video lưu H.264, CRF 28, 480p — không lưu full HD
 - `FrameRingBuffer` **luôn chạy liên tục**, không chỉ khi có vi phạm (cần 10s pre-event)
-- SQLite WAL mode — bắt buộc để tránh lock khi nhiều thread ghi đồng thời
+- Kết nối thông qua Connection Pool MySQL để tránh nghẽn khi ghi dữ liệu
 - Không lưu raw video 24/7 — chỉ lưu clip 10–30s quanh vi phạm
 
 ### Thread safety
 - Mỗi camera = 1 thread riêng
-- Giao tiếp giữa camera thread và `InferenceEngine` (pipelines/) qua `queue.Queue`
-- Dùng `threading.Lock` khi ghi SQLite nếu không dùng WAL, hoặc để WAL tự xử lý (db/)
+- Giao tiếp giữa camera thread và `InferenceEngine` (shared/inference_engine.py) qua `queue.Queue`
+- Sử dụng Database Connection Pool để tự động quản lý và phân phối kết nối ghi dữ liệu (shared/db/)
 - Dashboard MJPEG frame buffer cần lock khi update (app/)
 
 ### Config-driven — KHÔNG hardcode
@@ -128,62 +128,55 @@ imageio-ffmpeg>=0.4.9
 
 ---
 
-## Cấu trúc thư mục — giữ đúng (theo chuẩn repo công ty)
+## Cấu trúc thư mục — giữ đúng (theo chuẩn repo thực tế)
 
 ```
-sop_monitoring/
-├── .github/
-│   └── workflows/
-├── app/                        # Flask server, routes, frontend
-│   ├── app.py
-│   ├── api_routes.py
-│   ├── socketio_events.py
-│   ├── templates/              # index, station, history, stats
-│   └── static/                 # css, js
-├── core/                       # Core AI & SOP logic
-│   ├── lstm_model.py
-│   ├── step_classifier.py
-│   ├── feature_engineer.py
-│   ├── state_machine.py
-│   └── violation_detector.py
-├── db/                         # Database layer
-│   ├── db.py
-│   ├── models.py
-│   ├── queries.py
-│   └── cleanup.py
-├── events/                     # Event handling & alerts
-│   ├── audio_alert.py
-│   └── clip_saver.py
-├── integrations/               # External integrations (camera, models)
-│   ├── rtsp_stream.py
-│   ├── hand_detector.py
-│   └── keypoint_extractor.py
-├── pipelines/                  # Processing pipelines
-│   ├── inference_engine.py     # ← ĐỔI TÊN từ batch_engine.py (CPU không batch)
-│   ├── frame_buffer.py
-│   └── frame_processor.py
-├── services/                   # Shared services & utilities
-│   ├── config_loader.py
-│   ├── disk_monitor.py
-│   ├── logger.py
-│   └── annotator.py
-├── config/
-│   ├── config.yaml
-│   └── sop_definitions/
-├── models/
-│   ├── yolo/hand_detector.onnx     # ← ONNX format (KHÔNG phải .pt)
-│   └── lstm/
-│       ├── step_classifier.pt
-│       └── label_map.json
-├── training/
-├── tests/
-├── sounds/alert.wav
-├── data/violations/ và data/logs/
-├── .env.example
-├── .gitignore
-├── main.py
-├── requirements.txt
-└── README.md
+AI_Monitoring_Hub/
+|-- app/                             # Flask server, routes, frontend
+|   |-- __init__.py
+|   |-- routes.py                    # REST API & WebSocket endpoints, page routing
+|   |-- templates/                   # Giao diện HTML (index, station, history, stats, portal)
+|   +-- static/                      # css/style.css, js/main.js
+|-- config/                          # Cấu hình dự án
+|   +-- config.yaml
+|-- projects/                        # Thư mục các dự án con
+|   +-- sop_monitoring/              # Dự án SOP Monitoring
+|       |-- core/                    # Logic phân tích và SOP engines
+|       |   |-- engines/             # Quy trình riêng của từng sản phẩm (TFF4040, 626287)
+|       |   |   |-- base_engine.py
+|       |   |   |-- loader.py
+|       |   |   |-- 626287_engine.py
+|       |   |   +-- TFF4040_engine.py
+|       |   |-- action_inference.py
+|       |   |-- sop_graph.py
+|       |   |-- spatial_engine.py
+|       |   |-- tracking_engine.py
+|       |   +-- violation_detector.py
+|       |-- docs/                    # Tài liệu đặc tả hệ thống
+|       |   |-- READING_ORDER.md
+|       |   |-- RULES.md
+|       |   +-- SOP_MONITORING_PLAN_v2.md
+|       |-- buffer.py                # Frame Ring Buffer
+|       |-- hand_detector.py         # Hand Detection wrap YOLO ONNX
+|       +-- processor.py             # Frame Processor điều phối camera stream
+|-- shared/                          # Module dùng chung cho toàn hệ thống
+|   |-- db/                          # Tầng Database MySQL
+|   |   |-- db.py                    # Cấu hình pool và bảng
+|   |   |-- queries.py               # Lớp truy vấn SQL
+|   |   +-- cleanup.py               # Daemon thread dọn dẹp ổ đĩa
+|   |-- events/                      # Xử lý âm thanh & cắt clip
+|   |   |-- audio_alert.py
+|   |   +-- clip_saver.py
+|   |-- services/                    # Dịch vụ nền
+|   |   |-- annotator.py
+|   |   |-- config_loader.py
+|   |   |-- disk_monitor.py
+|   |   +-- logger.py
+|   |-- inference_engine.py          # Singleton ONNX Inference Engine (CPU-only)
+|   +-- rtsp_manager.py              # RTSP Reconnecting Stream manager
+|-- main.py                          # Entry point khởi động ứng dụng
+|-- requirements.txt
++-- .env
 ```
 
 Không tạo file ngoài cấu trúc này. Không đổi tên module.
@@ -242,21 +235,20 @@ class StepClassifier:
 ## Database schema tóm tắt
 
 ```sql
-PRAGMA journal_mode = WAL;
-
-cameras(id, station_id UNIQUE, name, rtsp_url, status, created_at)
-sop_steps(id, station_id, step_order, step_name, step_label, max_duration_ms, is_mandatory)
-sessions(id, camera_id, start_time, end_time, total_steps, correct_steps, compliance_rate)
-events(id, session_id, camera_id, timestamp, step_detected, confidence,
-       sop_status, violation_type, expected_step, clip_path)
-violation_clips(id, event_id, camera_id, file_path, file_size_mb, duration_sec, created_at)
-system_health(id, camera_id, fps, latency_ms, cpu_usage, ram_used_mb, disk_free_gb, checked_at)
+sop_definitions(id, name, description, total_steps, version, is_active, created_at, updated_at)
+sop_steps(id, definition_id, step_order, step_name, step_label, max_duration_ms, is_mandatory)
+sop_cameras(id, station_id UNIQUE, name, rtsp_url, definition_id, status, created_at)
+sop_sessions(id, camera_id, definition_id, start_time, end_time, total_steps, correct_steps, compliance_rate)
+sop_events(id, session_id, camera_id, definition_id, timestamp, step_detected, confidence,
+           sop_status, violation_type, expected_step, clip_path)
+sop_clips(id, event_id, camera_id, file_path, file_size_mb, duration_sec, created_at)
+sop_health(id, camera_id, fps, latency_ms, cpu_usage, ram_used_mb, disk_free_gb, checked_at)
 ```
 
 Index bắt buộc:
 ```sql
-CREATE INDEX idx_events_camera_time ON events(camera_id, timestamp);
-CREATE INDEX idx_events_session ON events(session_id);
+CREATE INDEX idx_sop_events_camera_time ON sop_events(camera_id, timestamp);
+CREATE INDEX idx_sop_events_session ON sop_events(session_id);
 ```
 
 ---
