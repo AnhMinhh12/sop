@@ -1,0 +1,62 @@
+station_id: "01"
+station_name: "Station 01 - Lắp & Check Jig (Product 626287)"
+
+# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+zones:
+  mold: [[0.434, 0.611], [0.522, 0.747], [0.645, 0.569], [0.559, 0.456]]
+  button_right: [[0.311, 0.719], [0.294, 0.689], [0.317, 0.661], [0.338, 0.689]]
+  middle_table: [[0.391, 0.55], [0.344, 0.481], [0.431, 0.383], [0.472, 0.444]]
+  left_table: [[0.556, 0.389], [0.434, 0.242], [0.514, 0.167], [0.648, 0.289]]
+
+# QUY TRÌNH SOP CHI TIẾT (7 BƯỚC CHO MÃ HÀNG 626287)
+steps:
+  - step_order: 1
+    step_name: "Rút 4 SP từ khuôn ra ngoài (2 tay)"
+    logic: "multi_trigger"
+    active_hand: "both"
+    required_zone: "mold"
+    required_count: 4
+
+  - step_order: 2
+    step_name: "Để sản phẩm ra bàn trái (1 tay)"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "left_table"
+
+  - step_order: 3
+    step_name: "Lấy terminal từ bàn giữa ra (1 tay)"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "middle_table"
+
+  - step_order: 4
+    step_name: "Lắp terminal vào khuôn 8 lần (1 tay)"
+    logic: "multi_trigger"
+    active_hand: "any"
+    required_zone: "mold"
+    required_count: 8
+
+  - step_order: 5
+    step_name: "Rút gate ra khỏi khuôn (2 tay)"
+    logic: "zone_trigger"
+    active_hand: "both"
+    required_zone: "mold"
+
+  - step_order: 6
+    step_name: "Bấm nút phải (1 tay)"
+    logic: "zone_trigger"
+    active_hand: "right"
+    required_zone: "button_right"
+
+  - step_order: 7
+    step_name: "Để gate ra bàn trái (1 tay)"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "left_table"
+
+config:
+  violation_tolerance: 8
+  idle_timeout_frames: 120
+  transition_timeout_sec: 15.0
+  min_step_dwell_sec: 0.8
+  restart_allowed_until_step: 1
