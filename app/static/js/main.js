@@ -77,8 +77,36 @@ async function initDashboard() {
 }
 
 /* --- LOGIC TRANG LỊCH SỬ --- */
+/* --- LOGIC TRANG LỊCH SỬ --- */
+async function loadProducts(stationId = '', selectElementId = 'filter-product') {
+    console.log("[DEBUG_UI] loadProducts called with stationId:", stationId, "select:", selectElementId);
+    const select = document.getElementById(selectElementId);
+    if (!select) return;
+    select.innerHTML = '<option value="">Tất cả mã</option>';
+    
+    const target = stationId || 'all';
+    const url = `/api/station/${target}/products`;
+    console.log("[DEBUG_UI] Fetching products from URL:", url);
+    try {
+        const response = await fetch(url);
+        console.log("[DEBUG_UI] Response status:", response.status);
+        const products = await response.json();
+        console.log("[DEBUG_UI] Products received:", products);
+        products.forEach(prod => {
+            const opt = document.createElement('option');
+            const cleanName = prod.name.replace(' (Auto)', '');
+            opt.value = cleanName;
+            opt.textContent = cleanName;
+            select.appendChild(opt);
+        });
+    } catch (err) {
+        console.error("[DEBUG_UI] Error loading products:", err);
+    }
+}
+
 async function initHistoryPage(selectedId = "") {
     const stationSelect = document.getElementById('filter-station');
+    const productSelect = document.getElementById('filter-product');
     const dateInput = document.getElementById('filter-date');
 
     if (stationSelect && stationSelect.options.length <= 1) {
@@ -86,31 +114,58 @@ async function initHistoryPage(selectedId = "") {
         const cameras = await response.json();
         cameras.forEach(cam => {
             const opt = document.createElement('option');
-            opt.value = cam.station_id;
+            const camId = cam.id || cam.station_id;
+            opt.value = camId;
             opt.textContent = cam.name;
-            if (cam.station_id === selectedId) opt.selected = true;
+            if (camId === selectedId) opt.selected = true;
             stationSelect.appendChild(opt);
         });
     }
 
-    loadHistory(selectedId, dateInput ? dateInput.value : "");
+    // Load products dropdown on init
+    await loadProducts(selectedId, 'filter-product');
+
+    loadHistory(selectedId, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
+
+    if (stationSelect) {
+        stationSelect.onchange = async () => {
+            await loadProducts(stationSelect.value, 'filter-product');
+            loadHistory(stationSelect.value, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
+        };
+    }
+
+    if (productSelect) {
+        productSelect.onchange = () => {
+            loadHistory(stationSelect ? stationSelect.value : "", productSelect.value, dateInput ? dateInput.value : "");
+        };
+    }
 
     // Gán sự kiện cho nút tìm kiếm nếu chưa có
     const searchBtn = document.querySelector('.btn-primary');
     if (searchBtn) {
         searchBtn.onclick = () => {
-            loadHistory(stationSelect.value, dateInput.value);
+            loadHistory(stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
         };
     }
 }
 
-async function loadHistory(stationId = '', date = '') {
+function applyFilters() {
+    const stationSelect = document.getElementById('filter-station');
+    const productSelect = document.getElementById('filter-product');
+    const dateInput = document.getElementById('filter-date');
+    if (stationSelect && productSelect && dateInput) {
+        loadHistory(stationSelect.value, productSelect.value, dateInput.value);
+    }
+}
+
+async function loadHistory(stationId = '', productId = '', date = '') {
     const list = document.getElementById('history-list');
     if (!list) return;
     list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
 
     let url = `/api/events?limit=100`;
     if (stationId) url += `&camera_id=${stationId}`;
+    if (productId) url += `&product_id=${productId}`;
     if (date) url += `&date=${date}`;
 
     try {
@@ -124,11 +179,18 @@ async function loadHistory(stationId = '', date = '') {
         }
 
         events.forEach(ev => {
-            const typeMap = { 'skip_step': 'Bỏ bước', 'timeout': 'Quá giờ', 'wrong_step': 'Sai bước', 'premature_restart': 'Reset sớm' };
+            const typeMap = { 
+                'skip_step': 'Bỏ bước', 
+                'timeout': 'Quá giờ', 
+                'wrong_step': 'Sai bước', 
+                'premature_restart': 'Reset sớm',
+                'success': 'Hoàn thành' 
+            };
             const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
             const isViolation = ev.sop_status === 'violation';
             const row = document.createElement('tr');
             row.className = 'event-row';
+            if (!isViolation) row.style.opacity = '0.8';
             row.innerHTML = `
                 <td>${ev.timestamp}</td>
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
@@ -137,7 +199,7 @@ async function loadHistory(stationId = '', date = '') {
                 <td>${ev.step_detected || '-'}</td>
                 <td>${(ev.confidence * 100).toFixed(1)}%</td>
                 <td>
-                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '-'}
+                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
                 </td>
             `;
             list.appendChild(row);
@@ -148,6 +210,7 @@ async function loadHistory(stationId = '', date = '') {
 /* --- LOGIC TRANG THỐNG KÊ --- */
 async function initStatsPage(selectedId = "") {
     const stationSelect = document.getElementById('filter-station');
+    const productSelect = document.getElementById('filter-product');
     const dateInput = document.getElementById('target-date');
     if (!dateInput) return;
 
@@ -160,23 +223,42 @@ async function initStatsPage(selectedId = "") {
         const cameras = await response.json();
         cameras.forEach(cam => {
             const opt = document.createElement('option');
-            opt.value = cam.station_id;
+            const camId = cam.id || cam.station_id;
+            opt.value = camId;
             opt.textContent = cam.name;
-            if (cam.station_id === selectedId) opt.selected = true;
+            if (camId === selectedId) opt.selected = true;
             stationSelect.appendChild(opt);
         });
     }
 
-    loadStats(today, selectedId);
+    // Load products dropdown on init
+    await loadProducts(selectedId, 'filter-product');
 
-    dateInput.onchange = () => loadStats(dateInput.value, stationSelect.value);
-    stationSelect.onchange = () => loadStats(dateInput.value, stationSelect.value);
+    loadStats(today, selectedId, productSelect ? productSelect.value : "");
+
+    dateInput.onchange = () => loadStats(dateInput.value, stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "");
+    if (stationSelect) {
+        stationSelect.onchange = async () => {
+            await loadProducts(stationSelect.value, 'filter-product');
+            loadStats(dateInput.value, stationSelect.value, productSelect ? productSelect.value : "");
+        };
+    }
+    if (productSelect) {
+        productSelect.onchange = () => {
+            loadStats(dateInput.value, stationSelect ? stationSelect.value : "", productSelect.value);
+        };
+    }
 }
 
-async function loadStats(date, cameraId = "") {
+async function loadStats(date, cameraId = "", productId = "") {
     try {
+        // Clean up inputs
+        if (cameraId === "undefined" || cameraId === "null") cameraId = "";
+        if (productId === "undefined" || productId === "null") productId = "";
+        
         let filter = `date=${date}`;
-        if (cameraId && cameraId !== "null") filter += `&camera_id=${cameraId}`;
+        if (cameraId) filter += `&camera_id=${cameraId}`;
+        if (productId) filter += `&product_id=${productId}`;
 
         // 1. Summary
         const summaryRes = await fetch(`/api/stats/summary?${filter}`);
@@ -202,8 +284,21 @@ function renderPieChart(data) {
     if (pieChart) pieChart.destroy();
     const labels = Object.keys(data);
     const values = Object.values(data);
-    const typeMap = { 'skip_step': 'Bỏ bước', 'timeout': 'Quá giờ', 'wrong_step': 'Sai bước', 'premature_restart': 'Reset sớm' };
-    const typeColors = { 'skip_step': '#ef4444', 'timeout': '#f59e0b', 'wrong_step': '#6366f1', 'premature_restart': '#10b981' };
+    
+    const typeMap = { 
+        'skip_step': 'Bỏ bước', 
+        'timeout': 'Quá giờ', 
+        'wrong_step': 'Sai bước', 
+        'premature_restart': 'Reset sớm',
+        'idle_timeout': 'Nghỉ quá lâu'
+    };
+    const typeColors = { 
+        'skip_step': '#ef4444', 
+        'timeout': '#f59e0b', 
+        'wrong_step': '#6366f1', 
+        'premature_restart': '#10b981',
+        'idle_timeout': '#64748b'
+    };
 
     pieChart = new Chart(ctx, {
         type: 'doughnut',
@@ -218,14 +313,41 @@ function renderPieChart(data) {
 function renderLineChart(data) {
     const ctx = document.getElementById('violationLineChart').getContext('2d');
     if (lineChart) lineChart.destroy();
+    
+    const labels = data.map(d => d.day);
+    const values = data.map(d => d.count);
+
     lineChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: data.map(d => d.day),
-            datasets: [{ label: 'Số lỗi', data: data.map(d => d.count), borderColor: '#2d5cf7', backgroundColor: 'rgba(45, 92, 247, 0.1)', fill: true, tension: 0.4 }]
+            labels: labels,
+            datasets: [{ 
+                label: 'Số lỗi', 
+                data: values, 
+                borderColor: '#2d5cf7', 
+                backgroundColor: 'rgba(45, 92, 247, 0.1)', 
+                fill: true, 
+                tension: 0.4,
+                pointRadius: 4,
+                pointBackgroundColor: '#2d5cf7'
+            }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        options: { 
+            responsive: true, 
+            plugins: { legend: { display: false } }, 
+            scales: { 
+                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                x: { grid: { display: false } }
+            } 
+        }
     });
+
+    if (data.length > 0) {
+        const trendTitle = document.getElementById('trend-title');
+        if (trendTitle) {
+            trendTitle.innerText = `Xu hướng tuần (${data[0].date} đến ${data[data.length - 1].date})`;
+        }
+    }
 }
 
 /* --- LOGIC DASHBOARD & CAMERA --- */
@@ -441,19 +563,33 @@ function showToast(title, message, type = 'info') {
     toast.innerHTML = `
         <div class="toast-header">
             <span class="toast-title">${title}</span>
-            <span class="toast-time">${timeStr}</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="toast-time">${timeStr}</span>
+                <button class="toast-close" type="button">&times;</button>
+            </div>
         </div>
         <div class="toast-body">${message}</div>
     `;
 
     container.appendChild(toast);
 
-    // Tự động xóa sau 5 giây
-    setTimeout(() => {
+    // Xử lý nút đóng nhanh
+    const closeBtn = toast.querySelector('.toast-close');
+    let autoRemoveTimeout = null;
+
+    const dismissToast = () => {
+        if (autoRemoveTimeout) clearTimeout(autoRemoveTimeout);
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(100%)';
-        setTimeout(() => toast.remove(), 500);
-    }, 5000);
+        setTimeout(() => toast.remove(), 300);
+    };
+
+    if (closeBtn) {
+        closeBtn.onclick = dismissToast;
+    }
+
+    // Tự động xóa sau 5 giây
+    autoRemoveTimeout = setTimeout(dismissToast, 5000);
 }
 
 // Socket IO logic giữ nguyên

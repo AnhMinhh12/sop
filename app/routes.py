@@ -119,11 +119,10 @@ def get_cameras():
 def get_events():
     limit = request.args.get('limit', 50, type=int)
     camera_id = request.args.get('camera_id', None)
+    product_id = request.args.get('product_id', None)
+    date = request.args.get('date', None)
 
-    if camera_id:
-        events = EventQueries.get_events_by_camera(camera_id, limit=limit)
-    else:
-        events = EventQueries.get_recent_events(limit=limit)
+    events = EventQueries.get_filtered_events(camera_id=camera_id, product_id=product_id, date=date, limit=limit)
 
     # Chuyển datetime và BIGINT thành string để tránh lỗi precision ở Frontend JS
     for ev in events:
@@ -139,11 +138,71 @@ def get_events():
     return jsonify(events)
 
 
+@app.route('/api/station/<camera_id>/products')
+def get_station_products(camera_id):
+    def map_raw_to_clean_product(raw_name: str) -> str:
+        if not raw_name:
+            return None
+        raw_name_lower = raw_name.lower()
+        if "626287" in raw_name_lower:
+            return "626287"
+        if any(k in raw_name_lower for k in ["tff4040", "reformed", "test model", "sản phẩm a"]):
+            return "TFF4040"
+        return None
+
+    try:
+        products = []
+        if camera_id and camera_id not in ["all", "undefined", "null"]:
+            products = CameraQueries.get_products_by_camera(camera_id)
+        
+        # If camera_id is "all" or the query returned no records, load all definitions from DB
+        if not products:
+            conn = db.get_connection()
+            if conn:
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT DISTINCT id, name FROM sop_definitions ORDER BY name")
+                    products = cursor.fetchall()
+                    cursor.close()
+                except Exception as db_err:
+                    logger.warning(f"Failed to query all products from DB: {db_err}")
+                finally:
+                    conn.close()
+            
+        config = ConfigLoader.load_config()
+        products_cfg = config.get("products", [])
+
+        # If we got products from DB, map them to clean IDs
+        clean_ids = set()
+        for p in products:
+            name = p.get("name", "")
+            clean_id = map_raw_to_clean_product(name)
+            if clean_id:
+                clean_ids.add(clean_id)
+
+        # Build response list matching config.yaml definitions
+        res = []
+        for p in products_cfg:
+            p_id = p.get("id")
+            if p_id in clean_ids:
+                res.append({"id": p_id, "name": p.get("name")})
+
+        # Fallback to all config products if no match found
+        if not res:
+            res = [{"id": p.get("id"), "name": p.get("name")} for p in products_cfg]
+
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in get_station_products: {e}")
+        return jsonify([])
+
+
 @app.route('/api/stats/summary')
 def get_stat_summary():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
-    summary = EventQueries.get_daily_summary(target_date, camera_id=camera_id)
+    product_id = request.args.get('product_id')
+    summary = EventQueries.get_daily_summary(target_date, camera_id=camera_id, product_id=product_id)
     return jsonify(summary)
 
 
@@ -151,7 +210,8 @@ def get_stat_summary():
 def get_stat_trend():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
-    trend = EventQueries.get_weekly_trend(target_date, camera_id=camera_id)
+    product_id = request.args.get('product_id')
+    trend = EventQueries.get_weekly_trend(target_date, camera_id=camera_id, product_id=product_id)
     return jsonify(trend)
 
 
@@ -159,7 +219,8 @@ def get_stat_trend():
 def get_stat_distribution():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
-    dist = EventQueries.get_daily_distribution(target_date, camera_id=camera_id)
+    product_id = request.args.get('product_id')
+    dist = EventQueries.get_daily_distribution(target_date, camera_id=camera_id, product_id=product_id)
     return jsonify(dist)
 
 

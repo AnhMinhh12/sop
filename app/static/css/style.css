@@ -92,6 +92,31 @@ body {
 .toast.warning { border-left-color: var(--warning); }
 .toast.warning .toast-title { color: var(--warning); }
 
+.toast.info { border-left-color: var(--info); }
+.toast.info .toast-title { color: var(--info); }
+
+.toast-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.35rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+}
+
+.toast-close:hover {
+    color: var(--danger);
+    opacity: 1;
+    transform: scale(1.15);
+}
+
 @keyframes toastIn {
     from { transform: translateX(120%); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }

@@ -153,11 +153,12 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_summary(target_date: str, camera_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_daily_summary(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> Dict[str, Any]:
         """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
-        # Bảo vệ: Nếu JS gửi chuỗi "undefined", coi như là None
         if camera_id == "undefined" or not camera_id:
             camera_id = None
+        if product_id == "undefined" or not product_id:
+            product_id = None
             
         conn = db.get_connection()
         cursor = conn.cursor()
@@ -168,11 +169,22 @@ class EventQueries:
             if camera_id:
                 where_clause += " AND c.station_id = %s"
                 params.append(camera_id)
+            if product_id:
+                if product_id == "TFF4040":
+                    where_clause += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clause += " AND (d.name LIKE %s)"
+                    params.append("%626287%")
+                else:
+                    where_clause += " AND (d.name LIKE %s OR d.name = %s)"
+                    params.extend([f"%{product_id}%", product_id])
 
             # Đếm lỗi
             cursor.execute(f"""
                 SELECT COUNT(*) as cnt FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
                 {where_clause} AND e.sop_status = 'violation'
             """, tuple(params))
             violations = cursor.fetchone()["cnt"]
@@ -181,6 +193,7 @@ class EventQueries:
             cursor.execute(f"""
                 SELECT COUNT(*) as cnt FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
                 {where_clause} AND e.sop_status = 'completed'
             """, tuple(params))
             completions = cursor.fetchone()["cnt"]
@@ -193,7 +206,7 @@ class EventQueries:
                 "total_completions": completions,
                 "compliance_rate": round(compliance, 1)
             }
-            EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id} -> {res}")
+            EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id}, Prod:{product_id} -> {res}")
             return res
         except Exception as e:
             EventQueries._log_to_file(f"GET_SUMMARY_ERROR: {e}")
@@ -204,10 +217,12 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_distribution(target_date: str, camera_id: Optional[str] = None) -> Dict[str, int]:
+    def get_daily_distribution(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> Dict[str, int]:
         """Phân bổ loại vi phạm trong một ngày cụ thể."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
+        if product_id == "undefined" or not product_id:
+            product_id = None
             
         conn = db.get_connection()
         cursor = conn.cursor()
@@ -218,11 +233,22 @@ class EventQueries:
             if camera_id:
                 where_clause += " AND c.station_id = %s"
                 params.append(camera_id)
+            if product_id:
+                if product_id == "TFF4040":
+                    where_clause += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clause += " AND (d.name LIKE %s)"
+                    params.append("%626287%")
+                else:
+                    where_clause += " AND (d.name LIKE %s OR d.name = %s)"
+                    params.extend([f"%{product_id}%", product_id])
 
             cursor.execute(f"""
                 SELECT e.violation_type, COUNT(*) as cnt 
                 FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
                 {where_clause}
                 GROUP BY e.violation_type
             """, tuple(params))
@@ -236,10 +262,12 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_weekly_trend(target_date: str, camera_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_weekly_trend(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Lấy xu hướng vi phạm 7 ngày (Thứ 2 -> Chủ Nhật) của tuần chứa target_date."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
+        if product_id == "undefined" or not product_id:
+            product_id = None
             
         import datetime
         try:
@@ -256,12 +284,23 @@ class EventQueries:
             if camera_id:
                 where_clause += " AND c.station_id = %s"
                 params.append(camera_id)
+            if product_id:
+                if product_id == "TFF4040":
+                    where_clause += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clause += " AND (d.name LIKE %s)"
+                    params.append("%626287%")
+                else:
+                    where_clause += " AND (d.name LIKE %s OR d.name = %s)"
+                    params.extend([f"%{product_id}%", product_id])
 
             # Lấy dữ liệu gộp theo ngày
             cursor.execute(f"""
                 SELECT DATE(e.timestamp) as date, COUNT(*) as cnt 
                 FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
                 {where_clause}
                 GROUP BY DATE(e.timestamp)
             """, tuple(params))
@@ -306,6 +345,50 @@ class EventQueries:
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"DB Error getting events for camera {camera_id}: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def get_filtered_events(camera_id: Optional[str] = None, product_id: Optional[str] = None, date: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Truy vấn danh sách vi phạm được lọc theo camera, mã sản phẩm và ngày.
+        """
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            query = """
+                SELECT e.*, c.station_id, d.name as definition_name
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
+                WHERE e.sop_status = 'violation'
+            """
+            params = []
+            if camera_id:
+                query += " AND c.station_id = %s"
+                params.append(camera_id)
+            if product_id:
+                if product_id == "TFF4040":
+                    query += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    query += " AND (d.name LIKE %s)"
+                    params.append("%626287%")
+                else:
+                    query += " AND (d.name LIKE %s OR d.name = %s)"
+                    params.extend([f"%{product_id}%", product_id])
+            if date:
+                query += " AND DATE(e.timestamp) = %s"
+                params.append(date)
+            query += " ORDER BY e.timestamp DESC LIMIT %s"
+            params.append(limit)
+            
+            cursor.execute(query, tuple(params))
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"DB Error getting filtered events: {e}")
             return []
         finally:
             cursor.close()
@@ -413,6 +496,31 @@ class CameraQueries:
             cursor.close()
             conn.close()
 
+    @staticmethod
+    def get_products_by_camera(station_id: str) -> List[Dict[str, Any]]:
+        """Lấy danh sách các mã sản phẩm (definitions) liên kết hoặc từng chạy trên camera."""
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT DISTINCT d.id, d.name 
+                FROM sop_definitions d
+                JOIN sop_cameras c ON c.definition_id = d.id OR d.id IN (
+                    SELECT DISTINCT e.definition_id 
+                    FROM sop_events e 
+                    WHERE e.camera_id = c.id
+                )
+                WHERE c.station_id = %s
+                ORDER BY d.name
+            """, (station_id,))
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"DB Error getting products for camera {station_id}: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class DefinitionQueries:
     """
@@ -504,6 +612,21 @@ class DefinitionQueries:
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"DB Error getting steps: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def get_all_definitions() -> List[Dict[str, Any]]:
+        """Lấy danh sách tất cả định nghĩa SOP (mã hàng)."""
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id, name FROM sop_definitions ORDER BY name")
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"DB Error getting all definitions: {e}")
             return []
         finally:
             cursor.close()
