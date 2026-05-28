@@ -36,7 +36,7 @@ if not rtsp_default:
     rtsp_default = VIDEO_SOURCE_FALLBACK
 
 print(f"[*] Nguon mac dinh tu config: {rtsp_default}")
-user_input_source = input(f"Nhap duong dan RTSP hoac file video (Nhan Enter de dung '{rtsp_default}'): ").strip()
+user_input_source = input(f"Nhap duong dan RTSP hoac file video (Nhan Enter de dung '{rtsp_default}'): ").strip().strip('"\'')
 rtsp_url = user_input_source if user_input_source else rtsp_default
 
 if rtsp_url:

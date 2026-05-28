@@ -29,7 +29,7 @@ def main():
         
         choice = input("\nChon video muon trich xuat (1-{} hoac M): ".format(len(video_files))).strip()
         if choice.lower() == 'm':
-            video_path_str = input("Nhap duong dan file video cua ban: ").strip()
+            video_path_str = input("Nhap duong dan file video cua ban: ").strip().strip('"\'')
             selected_video = Path(video_path_str)
         else:
             try:
@@ -44,7 +44,7 @@ def main():
                 return
     else:
         print("ℹ️ Khong tim thay file video nao trong 'data/training_collection'.")
-        video_path_str = input("Vui long nhap duong dan file video thu cong: ").strip()
+        video_path_str = input("Vui long nhap duong dan file video thu cong: ").strip().strip('"\'')
         selected_video = Path(video_path_str)
         
     if not selected_video.exists() or not selected_video.is_file():
