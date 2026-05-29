@@ -5,7 +5,7 @@ import logging
 import os
 import numpy as np
 import psutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 from shared.rtsp_manager import RTSPStream
 from projects.sop_monitoring.hand_detector import HandDetector
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 _process = psutil.Process(os.getpid())
 
 
-from projects.sop_monitoring.core.spatial_engine import SpatialEngine
 
 class FrameProcessor:
     """
@@ -57,7 +56,15 @@ class FrameProcessor:
         self.engine = engine
         self.violation_detector = violation_detector
         
-        self.ring_buffer = FrameRingBuffer(self.fps, 10)  # 5s trước + 5s sau = 10s tổng
+        # Load pre/post seconds from config
+        from shared.services.config_loader import ConfigLoader
+        config = ConfigLoader.load_config()
+        storage_cfg = config.get("storage", {})
+        self.pre_seconds = int(storage_cfg.get("clip_pre_seconds", 20))
+        self.post_seconds = int(storage_cfg.get("clip_post_seconds", 5))
+        total_seconds = self.pre_seconds + self.post_seconds
+        
+        self.ring_buffer = FrameRingBuffer(self.fps, total_seconds)
         self.audio_alert = audio_alert
         self.clip_saver = clip_saver
 
@@ -65,6 +72,7 @@ class FrameProcessor:
         self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
         self.current_processed_frame = None
         self.latest_status = {"sop_status": "idle", "progress_percent": 0}
+        self.sop_config = None
         self._loop_count = 0
         self._cached_hands = []
         self._last_hands_update_time = 0.0
@@ -101,34 +109,11 @@ class FrameProcessor:
             if self._loop_count % 2 == 0:
                 detections = self.hand_detector.detect(frame)
                 
-                # 2. Phân loại Trái/Phải dựa trên tọa độ X
-                new_hands_data = []
-                if detections:
-                    # Sắp xếp các box theo thứ tự từ trái sang phải
-                    sorted_dets = sorted(detections, key=lambda x: x["bbox"][0])
-                    
-                    if len(sorted_dets) == 1:
-                        # Nếu chỉ thấy 1 tay, dựa vào vị trí so với tâm màn hình (Đã đảo ngược)
-                        cx = (sorted_dets[0]["bbox"][0] + sorted_dets[0]["bbox"][2]) / 2
-                        label = "right" if cx < (self._target_w / 2) else "left"
-                        new_hands_data.append({
-                            "label": label,
-                            "centroid": [cx / self._target_w, (sorted_dets[0]["bbox"][1] + sorted_dets[0]["bbox"][3]) / (2 * self._target_h)],
-                            "bbox": sorted_dets[0]["bbox"]
-                        })
-                    elif len(sorted_dets) >= 2:
-                        # Nếu thấy 2 tay trở lên (Đã đảo ngược)
-                        for i, det in enumerate([sorted_dets[0], sorted_dets[-1]]):
-                            label = "right" if i == 0 else "left"
-                            cx = (det["bbox"][0] + det["bbox"][2]) / 2
-                            cy = (det["bbox"][1] + det["bbox"][3]) / 2
-                            new_hands_data.append({
-                                "label": label,
-                                "centroid": [cx / self._target_w, cy / self._target_h],
-                                "bbox": det["bbox"]
-                            })
+                # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
+                filtered_dets = self._filter_detections_by_roi(detections)
                 
-                hands_data = new_hands_data
+                # 2. Bám vết và định danh tay Trái/Phải để tránh nhảy box khi có người khác
+                hands_data = self._associate_hands(filtered_dets)
                 self._cached_hands = hands_data
                 self._last_hands_update_time = loop_start
 
@@ -179,7 +164,7 @@ class FrameProcessor:
             time.sleep(max(0, self.frame_delay - elapsed))
 
     def _handle_violation(self, violation: Dict):
-        """Xử lý vi phạm: Đợi 10s để lấy đủ post-event frames rồi mới lưu."""
+        """Xử lý vi phạm: Đợi self.post_seconds để lấy đủ post-event frames rồi mới lưu."""
         def background_task():
             # 1. Phát âm thanh cảnh báo ngay lập tức
             if self.audio_alert: self.audio_alert.trigger()
@@ -188,11 +173,11 @@ class FrameProcessor:
             from app import emit_violation
             emit_violation(self.cam_id, violation)
             
-            # 3. Đợi 10 giây để thu thập phần 'sau lỗi' vào ring buffer
-            logger.info(f"FrameProcessor [{self.cam_id}]: Violation detected. Waiting 5s for post-event frames...")
-            time.sleep(5)
+            # 3. Đợi post_seconds giây để thu thập phần 'sau lỗi' vào ring buffer
+            logger.info(f"FrameProcessor [{self.cam_id}]: Violation detected. Waiting {self.post_seconds}s for post-event frames...")
+            time.sleep(self.post_seconds)
             
-            # 4. Lấy toàn bộ frames (Lúc này buffer chứa 10s trước + 10s sau)
+            # 4. Lấy toàn bộ frames (Lúc này buffer chứa pre_seconds + post_seconds = tổng thời gian)
             frames_to_save = self.ring_buffer.get_all()
             
             # 5. Lưu clip
@@ -233,6 +218,7 @@ class FrameProcessor:
             # Tạm thời khóa để đổi engine
             old_engine = self.engine
             self.engine = new_engine
+            self.sop_config = sop_config
             
             # Reset trạng thái
             self.engine.reset()
@@ -244,6 +230,165 @@ class FrameProcessor:
         except Exception as e:
             logger.error(f"FrameProcessor [{self.cam_id}]: Failed to switch engine: {e}")
             return False
+
+    def _filter_detections_by_roi(self, detections: List[Dict]) -> List[Dict]:
+        """Lọc các box nhận diện tay nằm ngoài vùng làm việc (ROI) của trạm để tránh nhận nhầm người đi qua."""
+        if not hasattr(self.engine, 'zones') or not self.engine.zones:
+            return detections
+        
+        xs = []
+        ys = []
+        for pts in self.engine.zones.values():
+            for p in pts:
+                xs.append(p[0])
+                ys.append(p[1])
+        
+        if not xs or not ys:
+            return detections
+            
+        # Thêm biên độ an toàn (margin) 15% xung quanh các vùng làm việc
+        margin_x = 0.15
+        margin_y = 0.15
+        
+        min_x = max(0.0, min(xs) - margin_x)
+        max_x = min(1.0, max(xs) + margin_x)
+        min_y = max(0.0, min(ys) - margin_y)
+        max_y = min(1.0, max(ys) + margin_y)
+        
+        filtered = []
+        for det in detections:
+            bbox = det["bbox"]
+            cx = ((bbox[0] + bbox[2]) / 2) / self._target_w
+            cy = ((bbox[1] + bbox[3]) / 2) / self._target_h
+            
+            if min_x <= cx <= max_x and min_y <= cy <= max_y:
+                filtered.append(det)
+                
+        return filtered
+
+    def _associate_hands(self, detections: List[Dict]) -> List[Dict]:
+        """
+        Bám vết bàn tay bằng khoảng cách Euclid (Temporal Consistency) kết hợp vị trí không gian.
+        Giúp định danh chính xác tay Trái/Phải và tránh hiện tượng nhảy box khi có tay lạ hoặc nhiễu.
+        """
+        new_hands_data = []
+        if not detections:
+            return []
+            
+        # Tìm vị trí trước đó của tay Trái/Phải từ cached_hands
+        prev_left = None
+        prev_right = None
+        for h in self._cached_hands:
+            if h["label"] == "left":
+                prev_left = h["centroid"]
+            elif h["label"] == "right":
+                prev_right = h["centroid"]
+                
+        # Ngưỡng dịch chuyển tối đa giữa 2 frame liên tiếp (normalized)
+        max_move = 0.25
+        
+        # Chuẩn bị danh sách ứng viên (candidate detections)
+        candidates = []
+        for det in detections:
+            bbox = det["bbox"]
+            cx = (bbox[0] + bbox[2]) / 2 / self._target_w
+            cy = (bbox[1] + bbox[3]) / 2 / self._target_h
+            candidates.append({
+                "centroid": [cx, cy],
+                "bbox": bbox,
+                "confidence": det.get("confidence", 1.0)
+            })
+            
+        best_left_cand = None
+        best_left_dist = max_move
+        best_right_cand = None
+        best_right_dist = max_move
+        
+        # Đối sánh với tay đã lưu ở frame trước
+        for cand in candidates:
+            c = cand["centroid"]
+            if prev_left is not None:
+                dist_l = float(np.linalg.norm(np.array(c) - np.array(prev_left)))
+                if dist_l < best_left_dist:
+                    best_left_dist = dist_l
+                    best_left_cand = cand
+            if prev_right is not None:
+                dist_r = float(np.linalg.norm(np.array(c) - np.array(prev_right)))
+                if dist_r < best_right_dist:
+                    best_right_dist = dist_r
+                    best_right_cand = cand
+                    
+        # Giải quyết xung đột nếu 2 tay cùng đối sánh vào 1 ứng viên
+        if best_left_cand and best_right_cand and best_left_cand == best_right_cand:
+            if best_left_dist < best_right_dist:
+                best_right_cand = None
+            else:
+                best_left_cand = None
+                
+        # Ghi nhận các ứng viên đã được khớp
+        matched_cands = []
+        if best_left_cand:
+            new_hands_data.append({
+                "label": "left",
+                "centroid": best_left_cand["centroid"],
+                "bbox": best_left_cand["bbox"]
+            })
+            matched_cands.append(best_left_cand)
+        if best_right_cand:
+            new_hands_data.append({
+                "label": "right",
+                "centroid": best_right_cand["centroid"],
+                "bbox": best_right_cand["bbox"]
+            })
+            matched_cands.append(best_right_cand)
+            
+        # Các ứng viên còn lại chưa được khớp
+        unmatched = [c for c in candidates if c not in matched_cands]
+        
+        # Nếu thiếu tay, khởi tạo mới từ các ứng viên chưa khớp bằng cách chia đôi màn hình/vị trí tương đối
+        if unmatched:
+            # Sắp xếp từ trái sang phải màn hình
+            unmatched = sorted(unmatched, key=lambda x: x["centroid"][0])
+            
+            # Trường hợp mất hoàn toàn cả 2 tay trước đó
+            if not best_left_cand and not best_right_cand:
+                if len(unmatched) == 1:
+                    cx = unmatched[0]["centroid"][0]
+                    # Mirror: bên trái camera (< 0.5) là tay phải, bên phải camera (>= 0.5) là tay trái
+                    label = "right" if cx < 0.5 else "left"
+                    new_hands_data.append({
+                        "label": label,
+                        "centroid": unmatched[0]["centroid"],
+                        "bbox": unmatched[0]["bbox"]
+                    })
+                else:
+                    # leftmost là tay phải, rightmost là tay trái (mirror)
+                    new_hands_data.append({
+                        "label": "right",
+                        "centroid": unmatched[0]["centroid"],
+                        "bbox": unmatched[0]["bbox"]
+                    })
+                    new_hands_data.append({
+                        "label": "left",
+                        "centroid": unmatched[-1]["centroid"],
+                        "bbox": unmatched[-1]["bbox"]
+                    })
+            # Chỉ thiếu tay trái
+            elif not best_left_cand:
+                new_hands_data.append({
+                    "label": "left",
+                    "centroid": unmatched[-1]["centroid"],
+                    "bbox": unmatched[-1]["bbox"]
+                })
+            # Chỉ thiếu tay phải
+            elif not best_right_cand:
+                new_hands_data.append({
+                    "label": "right",
+                    "centroid": unmatched[0]["centroid"],
+                    "bbox": unmatched[0]["bbox"]
+                })
+                
+        return new_hands_data
 
     def get_latest_frame(self): return self.current_processed_frame
     def stop(self):

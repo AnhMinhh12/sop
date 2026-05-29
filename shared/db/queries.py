@@ -144,7 +144,13 @@ class EventQueries:
                 "GROUP BY violation_type"
             )
             rows = cursor.fetchall()
-            return {row["violation_type"]: row["cnt"] for row in rows}
+            counts = {}
+            for row in rows:
+                vtype = row["violation_type"]
+                if vtype == "premature_restart":
+                    vtype = "skip_step"
+                counts[vtype] = counts.get(vtype, 0) + row["cnt"]
+            return counts
         except Exception as e:
             logger.error(f"DB Error getting violation counts: {e}")
             return {}
@@ -253,7 +259,13 @@ class EventQueries:
                 GROUP BY e.violation_type
             """, tuple(params))
             rows = cursor.fetchall()
-            return {row["violation_type"]: row["cnt"] for row in rows}
+            dist = {}
+            for row in rows:
+                vtype = row["violation_type"]
+                if vtype == "premature_restart":
+                    vtype = "skip_step"
+                dist[vtype] = dist.get(vtype, 0) + row["cnt"]
+            return dist
         except Exception as e:
             logger.error(f"DB Error getting daily distribution: {e}")
             return {}

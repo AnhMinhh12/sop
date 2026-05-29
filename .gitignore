@@ -38,6 +38,12 @@ projects/sop_monitoring/training/dataset *.rar
 *.pt
 *.db
 *.sqlite
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 
 # Ignore all weights in shared/models but keep structure
 shared/models/**/*.onnx
@@ -47,10 +53,20 @@ shared/models/**/*.json
 # Keep production templates or maps if needed (uncomment if you want to track them)
 # !shared/models/lstm/label_map.json
 
-# IDEs
+# Caches and local files
+.pytest_cache/
+.ipynb_checkpoints/
+*.log
+
+# Environments
+.env.*
+
+# IDEs & System Files
 .vscode/
 .idea/
 .gemini/
-*.log
 desktop.ini
 Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride

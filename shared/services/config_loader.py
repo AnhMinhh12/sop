@@ -35,7 +35,9 @@ class ConfigLoader:
         Loads the SOP steps definition for a specific station.
         """
         base_dir = os.getenv("SOP_DEFINITIONS_DIR", "config/sop_definitions")
-        sop_path = os.path.join(base_dir, f"station_{station_id}.yaml")
+        sop_path = os.path.join(base_dir, f"machine_{station_id}.yaml")
+        if not os.path.exists(sop_path):
+            sop_path = os.path.join(base_dir, f"station_{station_id}.yaml")
         if not os.path.exists(sop_path):
             logger.warning(f"SOP definition for station {station_id} not found at {sop_path}. Using empty.")
             return {"station_id": station_id, "steps": []}

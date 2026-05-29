@@ -130,7 +130,7 @@ def start_sop_monitoring():
         if sop_file:
             sop_def = ConfigLoader.load_yaml(sop_file)
         else:
-            clean_sid = station_id.replace("station_", "")
+            clean_sid = station_id.replace("station_", "").replace("machine_", "")
             sop_def = ConfigLoader.load_sop_definition(clean_sid)
         
         # --- ĐỒNG BỘ MYSQL: Lưu quy trình và camera vào DB để dashboard sử dụng ---
@@ -160,6 +160,7 @@ def start_sop_monitoring():
             audio_alert=audio_alert,
             clip_saver=clip_saver
         )
+        processor.sop_config = sop_def
 
         # Lưu vào registry và Khởi chạy
         processors[cam_id] = processor

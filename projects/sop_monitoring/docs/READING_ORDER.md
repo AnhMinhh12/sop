@@ -8,6 +8,7 @@
 - `projects/sop_monitoring/core/spatial_engine.py`: Engine xử lý logic dựa trên sự tương tác của tay với các vùng không gian (ROI).
 - `projects/sop_monitoring/core/engines/`: Thư mục chứa logic kiểm tra SOP cụ thể cho từng sản phẩm:
   - `base_engine.py`: Lớp cơ sở định nghĩa interface cho các SOP engine.
+  - `loader.py`: Tiện ích nạp động các class engine (`ProductEngine`) tương ứng cho từng mã sản phẩm dựa trên cấu hình.
   - `626287_engine.py`: Logic kiểm tra SOP riêng cho sản phẩm 626287.
   - `TFF4040_engine.py`: Logic kiểm tra SOP riêng cho sản phẩm TFF4040.
 - `projects/sop_monitoring/core/sop_graph.py`: Định nghĩa cấu trúc và thứ tự các bước SOP.
@@ -33,12 +34,26 @@
 - `shared/events/audio_alert.py`: Phát âm thanh cảnh báo (.wav) qua loa của server (sử dụng sounddevice).
 - `shared/events/clip_saver.py`: Lưu clip ghi hình vi phạm (MP4 H.264) từ bộ đệm vòng.
 - `shared/db/db.py`: Quản lý kết nối MySQL pool và tự khởi tạo cấu trúc bảng dữ liệu `sop_*`.
+- `shared/db/models.py`: Định nghĩa cấu trúc Dataclass đại diện cho từng bảng trong database, đảm bảo type safety.
 - `shared/db/queries.py`: Các câu truy vấn lấy danh sách camera, lịch sử sự kiện, thống kê hiệu suất.
 - `shared/db/cleanup.py`: Dọn dẹp ổ đĩa (xóa clip cũ nhất khi dung lượng ổ cứng đầy >85%).
 
 ## 6. Tầng Ứng dụng & Giao diện (Web Dashboard)
+*Cung cấp giao diện tương tác người dùng.*
 - `app/__init__.py` & `app/routes.py`: Khởi tạo ứng dụng Flask, định nghĩa các API endpoint trả về dữ liệu lịch sử/thống kê và phục vụ stream video.
 - `app/templates/` & `app/static/`: Giao diện Dashboard (HTML/CSS/JS) hỗ trợ SPA mượt mà, đồng bộ bộ lọc Máy & Mã hàng.
 
 ## 7. Entry Point
+*Điểm khởi chạy ứng dụng.*
 - `main.py`: Khởi động toàn bộ hệ thống, đọc config, khởi tạo camera threads và chạy Flask server.
+
+## 8. Công cụ & Hỗ trợ phát triển (Tools & Utilities)
+*Các script bổ trợ cho việc chuẩn bị dữ liệu, cấu hình, đồng bộ giao diện và huấn luyện.*
+- `sync_ui.py`: Script đồng bộ giao diện người dùng từ AI Monitoring Hub (hỗ trợ cả Offline Mode).
+- `shared/tools/capture_snapshot.py`: Công cụ chụp ảnh snapshot từ camera RTSP để cấu hình vùng ROI.
+- `shared/tools/zone_selector.py`: Giao diện GUI giúp lựa chọn tọa độ các vùng ROI trên ảnh snapshot.
+- `shared/tools/record_video.py`: Ghi hình video mẫu từ RTSP stream phục vụ thu thập tập dữ liệu.
+- `shared/tools/frame_extractor.py`: Trích xuất khung hình tự động từ video mẫu để gắn nhãn.
+- `shared/tools/prepare_training.py`: Chuẩn bị và phân chia tập dữ liệu train/val phục vụ huấn luyện YOLO.
+- `projects/sop_monitoring/training/clean_dataset.py`: Công cụ tự động dọn dẹp các tệp nhãn trống hoặc dữ liệu không hợp lệ.
+- `projects/sop_monitoring/training/train_on_colab.py`: Script hỗ trợ nén dữ liệu và tạo môi trường huấn luyện mô hình YOLO trên Google Colab.

@@ -183,7 +183,7 @@ async function loadHistory(stationId = '', productId = '', date = '') {
                 'skip_step': 'Bỏ bước', 
                 'timeout': 'Quá giờ', 
                 'wrong_step': 'Sai bước', 
-                'premature_restart': 'Reset sớm',
+                'premature_restart': 'Bỏ bước',
                 'success': 'Hoàn thành' 
             };
             const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
@@ -289,14 +289,14 @@ function renderPieChart(data) {
         'skip_step': 'Bỏ bước', 
         'timeout': 'Quá giờ', 
         'wrong_step': 'Sai bước', 
-        'premature_restart': 'Reset sớm',
+        'premature_restart': 'Bỏ bước',
         'idle_timeout': 'Nghỉ quá lâu'
     };
     const typeColors = { 
         'skip_step': '#ef4444', 
         'timeout': '#f59e0b', 
         'wrong_step': '#6366f1', 
-        'premature_restart': '#10b981',
+        'premature_restart': '#ef4444',
         'idle_timeout': '#64748b'
     };
 

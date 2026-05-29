@@ -107,6 +107,31 @@ def main():
     preview_input = input("Ban co muon hien thi cua so Preview khong? (Y/N, mac dinh Y): ").strip().lower()
     show_preview = preview_input != 'n'
 
+    # Lua chon do phan gia
+    print("\nChon do phan giai muon quay:")
+    print("  [1] 1920x1080 (1080p - Full HD)")
+    print("  [2] 1280x720 (720p - HD)")
+    print("  [3] 854x480 (480p - SD)")
+    print("  [4] 640x480 (VGA)")
+    print("  [5] 480x360")
+    print("  [6] 320x240 (QVGA)")
+    print("  [7] Giu nguyen do phan giai goc cua camera (Mac dinh)")
+    
+    res_choice = input("Nhap lua chon (1-7, mac dinh 7): ").strip()
+    target_width, target_height = None, None
+    if res_choice == '1':
+        target_width, target_height = 1920, 1080
+    elif res_choice == '2':
+        target_width, target_height = 1280, 720
+    elif res_choice == '3':
+        target_width, target_height = 854, 480
+    elif res_choice == '4':
+        target_width, target_height = 640, 480
+    elif res_choice == '5':
+        target_width, target_height = 480, 360
+    elif res_choice == '6':
+        target_width, target_height = 320, 240
+
     # 4. Ket noi camera (Ep buoc su dung RTSP over TCP de tranh mat goi tin gay loi decode H264)
     if isinstance(source, str) and source.startswith("rtsp://"):
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|rw_timeout;5000000"
@@ -128,22 +153,31 @@ def main():
     if not cap.isOpened():
         print(f"❌ LOI: Khong the ket noi toi nguon video: {source}")
         return
+
+    # Thu thiet lap do phan giai tren camera phan cung
+    if target_width and target_height:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
         
-    # Lay cac tham so video
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # Lay cac tham so video goc tu camera
+    orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps <= 0 or fps > 60:
         fps = 15.0 # Fallback
         
-    print(f"🎥 Ket noi thanh cong! Resolution: {width}x{height} | FPS: {fps}")
+    # Xac dinh do phan giai thuc te se ghi
+    write_width = target_width if target_width else orig_width
+    write_height = target_height if target_height else orig_height
+        
+    print(f"🎥 Ket noi thanh cong! Original: {orig_width}x{orig_height} | Target: {write_width}x{write_height} | FPS: {fps}")
     
     # Khoi tao VideoWriter (Uu tien chat luong nén cao nhat de tranh mo file dau ra)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     try:
-        out = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height), [cv2.VIDEOWRITER_PROP_QUALITY, 95])
+        out = cv2.VideoWriter(str(out_path), fourcc, fps, (write_width, write_height), [cv2.VIDEOWRITER_PROP_QUALITY, 95])
     except Exception:
-        out = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+        out = cv2.VideoWriter(str(out_path), fourcc, fps, (write_width, write_height))
     
     import queue
     import threading
@@ -205,6 +239,10 @@ def main():
                     break
                 continue
                 
+            # Resize frame neu khong khop voi do phan giai ghi
+            if frame.shape[1] != write_width or frame.shape[0] != write_height:
+                frame = cv2.resize(frame, (write_width, write_height))
+                
             # Ghi frame xuống đĩa ở luồng ghi riêng (luồng chính)
             out.write(frame)
             frame_count += 1
@@ -233,6 +271,9 @@ def main():
         while not frame_queue.empty():
             try:
                 frame = frame_queue.get_nowait()
+                # Resize frame neu khong khop voi do phan giai ghi
+                if frame.shape[1] != write_width or frame.shape[0] != write_height:
+                    frame = cv2.resize(frame, (write_width, write_height))
                 out.write(frame)
                 frame_count += 1
             except queue.Empty:

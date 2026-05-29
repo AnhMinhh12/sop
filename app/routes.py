@@ -174,11 +174,14 @@ def get_station_products(camera_id):
 
         # If we got products from DB, map them to clean IDs
         clean_ids = set()
-        for p in products:
-            name = p.get("name", "")
-            clean_id = map_raw_to_clean_product(name)
-            if clean_id:
-                clean_ids.add(clean_id)
+        if camera_id == "machine_07":
+            clean_ids = {"TFF4040", "626287"}
+        else:
+            for p in products:
+                name = p.get("name", "")
+                clean_id = map_raw_to_clean_product(name)
+                if clean_id:
+                    clean_ids.add(clean_id)
 
         # Build response list matching config.yaml definitions
         res = []
@@ -344,6 +347,11 @@ def switch_product(camera_id):
 @app.route('/api/station/<camera_id>/sop')
 def get_station_sop(camera_id):
     """Lấy danh sách các bước SOP hiện tại của trạm."""
+    # 1. Ưu tiên lấy SOP đang chạy từ FrameProcessor nếu có (đã switch product)
+    if camera_id in processors and getattr(processors[camera_id], 'sop_config', None):
+        steps = processors[camera_id].sop_config.get("steps", [])
+        return jsonify(steps)
+
     config = ConfigLoader.load_config()
     camera = next((c for c in config.get("cameras", []) if c['id'] == camera_id), None)
     

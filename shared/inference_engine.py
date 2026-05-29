@@ -4,6 +4,7 @@ import cv2
 import threading
 import time
 import logging
+import os
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class InferenceEngine:
             logger.error("InferenceEngine: model_path is required for initialization")
             return
 
-        self.model_path = model_path
+        self.model_path = os.path.abspath(model_path)
         self.num_threads = num_threads
         self.input_size = input_size
         self._infer_lock = threading.Lock()
