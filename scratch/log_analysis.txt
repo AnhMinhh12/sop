@@ -1,0 +1,19 @@
+Total cycles completed: 0
+Total VIOLATION events: 246
+Total ENGINE RESET events: 239
+
+--- Violation details ---
+- Timeout at step 1 (Đặt SP vào bàn bên trái): 90 times
+- Timeout at step 0 (Lấy 2 SP từ khuôn): 42 times
+- Timeout at step 2 (Lấy 2 Slider từ khuôn): 30 times
+- Timeout at step 4 (Lắp Terminal vào Slider): 28 times
+- Premature Restart at step 3: 17 times
+- Timeout at step 3 (Đặt Slider vào bàn giữa): 11 times
+- Premature Restart at step 1: 6 times
+- Timeout at step 6 (Tay PHẢI bấm nút bên PHẢI): 5 times
+- Skip Step detected. Next step (Lấy 2 Slider từ khuôn) seen while at step 1: 4 times
+- Premature Restart at step 6: 3 times
+- Timeout at step 5 (Đưa 2 Slider vào khuôn): 3 times
+- Skipped steps 8/9 and returned to Step 1. Entering delayed restart recovery.: 3 times
+- Premature Restart at step 7: 3 times
+- Skip Step detected. Future step 7 (Lấy Jig (Trái) & SP (Phải)) seen while at step 0: 1 times

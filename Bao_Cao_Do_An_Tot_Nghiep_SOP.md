@@ -638,8 +638,10 @@ Do thời gian xử lý AI cách tuần và tốc độ di chuyển tay cực nh
 Hệ thống thiết lập cơ chế bảo vệ: Nếu bộ điều phối `FrameProcessor` liên tục không nhận được bất kỳ hộp bao bàn tay nào từ mô hình YOLO trong vòng **0.3 giây** liên tục (khoảng 2-3 frame AI), hệ thống sẽ chủ động xóa sạch bộ nhớ đệm bám vết bàn tay (`self._cached_hands = []`). Hành động này ép buộc động cơ SOP ghi nhận trạng thái tay đã rút hoàn toàn khỏi mọi vùng làm việc, ngăn chặn triệt để các lỗi kích hoạt giả.
 
 #### 3.2.5 Tối ưu hóa chu kỳ reset và phục hồi lỗi SOP
-Khi phát hiện vi phạm quy trình SOP (như bỏ bước hoặc quay lại bước 1 sớm), hệ thống lập tức khóa trạng thái lỗi (`is_failed = True`), phát còi cảnh báo và hiển thị màn hình đỏ trên Dashboard. Để tiếp tục sản xuất, công nhân không cần thực hiện bất kỳ thao tác bấm nút thủ công nào trên màn hình (tránh làm bẩn màn hình hoặc mất thời gian dừng tay). 
+Khi phát hiện vi phạm quy trình SOP (như bỏ bước), hệ thống lập tức khóa trạng thái lỗi (`is_failed = True`), phát còi cảnh báo và hiển thị màn hình đỏ trên Dashboard. Để tiếp tục sản xuất, công nhân không cần thực hiện bất kỳ thao tác bấm nút thủ công nào trên màn hình (tránh làm bẩn màn hình hoặc mất thời gian dừng tay). 
 Hệ thống hỗ trợ cơ chế **Tự động Phục hồi Lỗi (Auto Recovery)**: Công nhân chỉ cần rút tay ra khỏi các vùng và đưa tay quay trở lại vùng hoạt động của **Bước 1**. Lõi động cơ SOP khi phát hiện sự tương tác hợp lệ tại vùng Bước 1 sẽ tự động giải phóng trạng thái lỗi, tăng chỉ số đếm chu kỳ (`cycle_count += 1`), đưa máy trạng thái về trạng thái khởi tạo chu kỳ mới ngay tức thì để công nhân tiếp tục công việc không bị gián đoạn.
+
+Đặc biệt, đối với hành động **Quay lại bước 1 sớm (Premature Restart)** trong khi đang thực hiện dở chu kỳ lắp ráp, hệ thống đã được tối ưu hóa để thực hiện **Reset chu kỳ mới lập tức một cách thầm lặng (Silent Cycle Reset)** thay vì coi là một lỗi vi phạm. Khi phát hiện tay công nhân quay lại vùng hoạt động của Bước 1 (`mold`), FSM sẽ tự động giải phóng chu kỳ cũ và bắt đầu chu kỳ mới ngay tức thì mà không báo lỗi đỏ hay phát còi. Điều này giúp loại bỏ hoàn toàn các cảnh báo giả khi công nhân chủ động thực hiện lại từ đầu hoặc do nhiễu nhảy vùng (bounding box jitter).
 
 ---
 

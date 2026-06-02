@@ -71,6 +71,13 @@ class ProductEngine(BaseEngine):
         now = time.time()
         self.last_hands = hands_data
         
+        # Cập nhật trạng thái rút tay của bước 1 cho frame sau, lưu trạng thái trước đó lại
+        was_s1_withdrawn = self.s1_withdrawn
+        step_1 = self.sop_steps[0]
+        s1_zones = self._get_all_zones_for_step(step_1)
+        is_currently_in_s1 = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in s1_zones)
+        self.s1_withdrawn = not is_currently_in_s1
+        
         # 1. Cập nhật vị trí
         active_zones = {"left": None, "right": None}
         for hand in hands_data:
@@ -132,13 +139,6 @@ class ProductEngine(BaseEngine):
         self.last_update_time = now
         self.hand_dist = self._get_hand_distance()
 
-        # Cập nhật trạng thái s1_withdrawn
-        step_1 = self.sop_steps[0]
-        s1_zones = self._get_all_zones_for_step(step_1)
-        is_currently_in_s1 = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in s1_zones)
-        if not is_currently_in_s1:
-            self.s1_withdrawn = True
-
         if self._completed_at > 0:
             step_1 = self.sop_steps[0]
             step_1_zones = self._get_all_zones_for_step(step_1)
@@ -192,33 +192,25 @@ class ProductEngine(BaseEngine):
                 self.log_debug(f"VIOLATION: Timeout at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
-            # --- KIỂM TRA QUAY LẠI BƯỚC 1 SỚM (PREMATURE RESTART) ĐỂ RESET CHU KỲ MỚI LẬP TỨC ---
+            # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
             if self.current_step_idx > 0:
                 step_1 = self.sop_steps[0]
                 s1_zones = self._get_all_zones_for_step(step_1)
                 
-                # Chỉ check nếu vùng Bước 1 không nằm trong các vùng bước hiện tại
+                # Chỉ check nếu vùng Bước 1 không nằm trong các vùng bước hiện tại và vùng bước tiếp theo
                 if not any(z in current_zones for z in s1_zones):
-                    # Và chỉ check nếu vùng Bước 1 không nằm trong các vùng của bước tiếp theo (tránh nhầm với skip step sang bước sau)
                     next_zones = []
                     if self.current_step_idx + 1 < len(self.sop_steps):
                         next_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx + 1])
                     
                     if not any(z in next_zones for z in s1_zones):
-                        # Tránh báo lỗi khi tay vừa làm xong bước trước đó ở vùng trùng bước 1
-                        # Giảm từ 5.0s xuống 1.0s để tăng độ nhạy
+                        # Tránh trùng lặp khi vừa hoàn thành bước trước
                         if not any(z == self.last_completed_zone and (now - self.last_completed_time < 1.0) for z in s1_zones):
-                            # Dùng centroid_only=False để phát hiện nhạy nhất (mép tay chạm vào cũng nhận)
                             is_in_s1 = any(self._is_in_zone(side, z, centroid_only=False) for side in ["left", "right"] for z in s1_zones)
-                            if is_in_s1 and self.s1_withdrawn:
-                                self.is_failed = True
-                                self.failed_step_idx = self.current_step_idx
-                                self.log_debug(f"VIOLATION: Premature Restart detected at step {self.current_step_idx}", self.product_id)
+                            if is_in_s1 and was_s1_withdrawn:
+                                self.log_debug(f"Quay lại bước 1 phát hiện ở bước {self.current_step_idx}. Tự động bắt đầu chu kỳ mới (Chu kỳ {self.cycle_count + 1})", self.product_id)
                                 
-                                # Trả về lỗi vi phạm cho frame này để kích hoạt loa/clip và hiển thị cảnh báo
-                                res = self._get_status_result(active_zones, "violation", violation_type="skip_step")
-                                
-                                # Reset trạng thái động cơ logic về chu kỳ mới lập tức
+                                # Reset trạng thái động cơ logic về chu kỳ mới lập tức (KHÔNG BÁO LỖI VI PHẠM)
                                 self.reset(now=now)
                                 self.cycle_count += 1
                                 self.waiting_for_start = False
@@ -226,7 +218,31 @@ class ProductEngine(BaseEngine):
                                 # Tính luôn bước 1 của chu kỳ mới cho frame này từ chính hands_data hiện tại
                                 self._check_step_logic(step_1, now, update_status=True)
                                 
-                                return res
+                                # Cập nhật lại active_zones theo chu kỳ mới
+                                active_zones_new = {"left": None, "right": None}
+                                for hand in hands_data:
+                                    side = hand["label"].lower()
+                                    if side not in ["left", "right"]: continue
+                                    centroid = hand["centroid"]
+                                    bbox = hand["bbox"]
+                                    w, h = self.config.get("w", 640), self.config.get("h", 480)
+                                    test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
+                                                   [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
+                                    
+                                    current_zone = None
+                                    current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
+                                    for z_name in current_step_zones:
+                                        z_pts = self.zones.get(z_name)
+                                        if z_pts:
+                                            poly = np.array(z_pts, np.float32)
+                                            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
+                                                current_zone = z_name
+                                                break
+                                    active_zones_new[side] = current_zone
+                                    self.hand_states[side]["zone"] = current_zone
+                                    self.hand_states[side]["entry_time"] = now
+                                
+                                return self._get_status_result(active_zones_new, "processing")
 
             if self._check_step_logic(current_step, now):
                 min_dwell = current_step.get("min_dwell_sec", self.config.get("min_step_dwell_sec", 0.3))
@@ -412,6 +428,15 @@ class ProductEngine(BaseEngine):
                     return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 return any_in
+            
+            # Cho phép hoàn thành chu kỳ bằng 1 trigger + rút tay cho bước đầu tiên (đặc trưng của TFF4040)
+            if self.current_step_idx == 0:
+                if self.hit_count >= count_needed:
+                    return True
+                if self.hit_count >= 1 and not any_in:
+                    return True
+                return False
+                
             return self.hit_count >= count_needed
         elif logic == "dual_task":
             l_zone, r_zone = step.get("left_zone"), step.get("right_zone")
