@@ -53,6 +53,10 @@ class ProductEngine(BaseEngine):
         
         self._zone_last_seen = {}
         self._stay_timer = {}
+        self._zone_entry_time = {}
+        self._zone_triggered = {}
+        self._hand_entry_time = {}
+        self._hit_registered = {}
         self.hand_history = {"left": [], "right": []}
         self.hit_count = 0
         self.last_trigger_states = {}
@@ -63,6 +67,7 @@ class ProductEngine(BaseEngine):
         self.in_delayed_restart = False
         self.restart_step_idx = 0
         self.s1_withdrawn = True
+        self.start_zone_entry_time = 0.0
         
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
@@ -140,32 +145,36 @@ class ProductEngine(BaseEngine):
         self.hand_dist = self._get_hand_distance()
 
         if self._completed_at > 0:
-            step_1 = self.sop_steps[0]
-            step_1_zones = self._get_all_zones_for_step(step_1)
-            is_in_s1_zone = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in step_1_zones)
-            
-            if is_in_s1_zone:
-                self._completed_at = 0
-                self.reset(now=now)
-                self.cycle_count += 1
-                self.waiting_for_start = False
-            elif now - self._completed_at < 1.0:
+            if now - self._completed_at < 1.5:
                 return self._get_status_result(active_zones, "completed")
             else:
                 self._completed_at = 0
-                self.reset()
+                self.reset(now=now)
 
         if self.is_failed:
             step_1 = self.sop_steps[0]
             step_1_zones = self._get_all_zones_for_step(step_1)
-            is_in_s1_zone = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in step_1_zones)
-            if is_in_s1_zone:
-                # Reset ngay lập tức khi phát hiện tay đã quay lại bước 1
+            
+            # Sử dụng self.hand_states làm nguồn dữ liệu chính xác để xác định tay đã giữ vững trong vùng Bước 1 ít nhất 0.2s
+            is_in_s1_zone_sustained = False
+            for side in ["left", "right"]:
+                for z in step_1_zones:
+                    if self._is_in_zone(side, z):
+                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
+                        if entry > 0.0 and (now - entry >= 0.2):
+                            is_in_s1_zone_sustained = True
+                            break
+                if is_in_s1_zone_sustained:
+                    break
+                    
+            if is_in_s1_zone_sustained:
+                self.log_debug("Phát hiện tay quay lại Bước 1 khi đang bị lỗi. Tự động reset và bắt đầu chu kỳ mới.", self.product_id)
                 self.reset(now=now)
                 self.cycle_count += 1
                 self.waiting_for_start = False
+                self.start_zone_entry_time = 0
             else:
-                return self._get_status_result(active_zones, "violation")
+                return self._get_status_result(active_zones, "violation", violation_type=self.violation_type)
 
         if self.current_step_idx < len(self.sop_steps):
             current_step = self.sop_steps[self.current_step_idx]
@@ -174,12 +183,20 @@ class ProductEngine(BaseEngine):
             
             if self.waiting_for_start:
                 if is_in_current_area:
-                    self.waiting_for_start = False
-                    self.cycle_count += 1
-                    self.step_start_time = now
-                    self.last_completed_time = now
-                    self.log_debug(f"CYCLE STARTED (Cycle {self.cycle_count})", self.product_id)
+                    if self.start_zone_entry_time == 0:
+                        self.start_zone_entry_time = now
+                    if now - self.start_zone_entry_time >= 0.3:
+                        self.waiting_for_start = False
+                        self.cycle_count += 1
+                        self.step_start_time = now
+                        self.last_completed_time = now
+                        self.start_zone_entry_time = 0
+                        self.log_debug(f"CYCLE STARTED (Cycle {self.cycle_count})", self.product_id)
+                    else:
+                        self.status_msg = "Sẵn sàng (Đang kích hoạt...)"
+                        return self._get_status_result(active_zones, "idle")
                 else:
+                    self.start_zone_entry_time = 0
                     self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
 
@@ -206,14 +223,27 @@ class ProductEngine(BaseEngine):
                     if not any(z in next_zones for z in s1_zones):
                         # Tránh trùng lặp khi vừa hoàn thành bước trước
                         if not any(z == self.last_completed_zone and (now - self.last_completed_time < 1.0) for z in s1_zones):
+                            # Chỉ tự động reset khi tay quay lại bước 1 (sau khi bước hiện tại bắt đầu) và giữ vững ít nhất 0.2s
                             is_in_s1 = any(self._is_in_zone(side, z, centroid_only=False) for side in ["left", "right"] for z in s1_zones)
-                            if is_in_s1 and was_s1_withdrawn:
-                                self.log_debug(f"Quay lại bước 1 phát hiện ở bước {self.current_step_idx}. Tự động bắt đầu chu kỳ mới (Chu kỳ {self.cycle_count + 1})", self.product_id)
+                            is_in_s1_sustained = False
+                            for side in ["left", "right"]:
+                                for z in s1_zones:
+                                    if self._is_in_zone(side, z):
+                                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
+                                        if entry > self.step_start_time and (now - entry >= 0.2):
+                                            is_in_s1_sustained = True
+                                            break
+                                if is_in_s1_sustained:
+                                    break
+                                    
+                            if is_in_s1_sustained:
+                                self.log_debug(f"Quay lại bước 1 phát hiện ở bước {self.current_step_idx}. Tự động bắt đầu chu kỳ mới lập tức (Chu kỳ {self.cycle_count + 1})", self.product_id)
                                 
                                 # Reset trạng thái động cơ logic về chu kỳ mới lập tức (KHÔNG BÁO LỖI VI PHẠM)
                                 self.reset(now=now)
                                 self.cycle_count += 1
                                 self.waiting_for_start = False
+                                self.start_zone_entry_time = 0
                                 
                                 # Tính luôn bước 1 của chu kỳ mới cho frame này từ chính hands_data hiện tại
                                 self._check_step_logic(step_1, now, update_status=True)
@@ -243,6 +273,9 @@ class ProductEngine(BaseEngine):
                                     self.hand_states[side]["entry_time"] = now
                                 
                                 return self._get_status_result(active_zones_new, "processing")
+                            else:
+                                if not is_in_s1:
+                                    self.start_zone_entry_time = 0
 
             if self._check_step_logic(current_step, now):
                 min_dwell = current_step.get("min_dwell_sec", self.config.get("min_step_dwell_sec", 0.3))
@@ -293,13 +326,18 @@ class ProductEngine(BaseEngine):
         self.last_update_time = time.time()
         self._zone_last_seen = {}
         self._stay_timer = {}
+        self._zone_entry_time = {}
+        self._zone_triggered = {}
+        self._hand_entry_time = {}
+        self._hit_registered = {}
         self.hit_count = 0
         self.last_completed_zone = None
-        self.last_completed_time = time.time()
+        self.last_completed_time = now if now else time.time()
         self.reset_dwell_start = 0
         self.in_delayed_restart = False
         self.restart_step_idx = 0
         self.s1_withdrawn = True
+        self.start_zone_entry_time = 0.0
         self.log_debug("ENGINE RESET", self.product_id)
 
     def get_status(self) -> Dict[str, Any]:
@@ -332,6 +370,10 @@ class ProductEngine(BaseEngine):
                     self._zone_last_seen[nz] = {"left": 0, "right": 0}
         
         self._zone_last_seen = {} # Reset toàn bộ cho chắc chắn
+        self._zone_entry_time = {}
+        self._zone_triggered = {}
+        self._hand_entry_time = {}
+        self._hit_registered = {}
         if self.current_step_idx >= len(self.sop_steps):
             self._completed_at = now
 
@@ -387,17 +429,30 @@ class ProductEngine(BaseEngine):
         if logic == "zone_trigger":
             target = step.get("required_zone")
             mode = step.get("active_hand", "any")
-            grace = 1.5
-            if target not in self._zone_last_seen: self._zone_last_seen[target] = {"left": 0, "right": 0}
-            if update_status:
-                for side in ["left", "right"]:
-                    if self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor): self._zone_last_seen[target][side] = now
-            time_limit = self.step_start_time
-            effective_left = (self._zone_last_seen[target]["left"] > time_limit and now - self._zone_last_seen[target]["left"] < grace)
-            effective_right = (self._zone_last_seen[target]["right"] > time_limit and now - self._zone_last_seen[target]["right"] < grace)
-            if mode == "both": return effective_left and effective_right
-            if mode == "any": return effective_left or effective_right
-            return effective_left if mode == "left" else effective_right
+            
+            if target not in self._zone_triggered:
+                self._zone_triggered[target] = {"left": False, "right": False}
+                
+            for side in ["left", "right"]:
+                is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                if is_in:
+                    entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == target else now
+                    if entry > 0.0 and (now - entry >= 0.2):
+                        if update_status:
+                            self._zone_triggered[target][side] = True
+                            
+            if not update_status:
+                if mode == "both":
+                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                return any(self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor) for side in ["left", "right"])
+                
+            if mode == "both":
+                return self._zone_triggered[target]["left"] and self._zone_triggered[target]["right"]
+            elif mode == "any":
+                return self._zone_triggered[target]["left"] or self._zone_triggered[target]["right"]
+            else:
+                return self._zone_triggered[target].get(mode, False)
+                
         elif logic == "stay_in_zone":
             target = step.get("required_zone")
             min_dur = step.get("min_duration_sec", 0.5)
@@ -410,67 +465,98 @@ class ProductEngine(BaseEngine):
             if mode == "any": return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
             elif mode == "both": return all(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
             return self._stay_timer[target][mode] > 0 and (now - self._stay_timer[target][mode]) >= min_dur
+            
         elif logic == "multi_trigger":
             target = step.get("required_zone")
             count_needed = step.get("required_count", 1)
             mode = step.get("active_hand", "any")
             any_in = False
+            
+            if target not in self._zone_last_seen:
+                self._zone_last_seen[target] = {"left": 0.0, "right": 0.0}
+            if target not in self._hit_registered:
+                self._hit_registered[target] = {"left": False, "right": False}
+                
             for side in ["left", "right"]:
                 is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
-                if is_in:
-                    if mode == "any" or mode == side:
-                        any_in = True
+                is_in_debounced = is_in
+                if not is_in and update_status:
+                    last_seen = self._zone_last_seen[target].get(side, 0.0)
+                    if last_seen > 0 and (now - last_seen < 0.3):
+                        is_in_debounced = True
+                        
                 if update_status:
-                    if is_in and not self.last_trigger_states.get(side, False): self.hit_count += 1
-                    self.last_trigger_states[side] = is_in
+                    if is_in:
+                        self._zone_last_seen[target][side] = now
+                        
+                if side not in self.last_trigger_states:
+                    was_already_in = (
+                        self.current_step_idx > 0 and
+                        self.hand_states[side]["zone"] == target and
+                        self.hand_states[side]["entry_time"] < self.step_start_time
+                    )
+                    self.last_trigger_states[side] = was_already_in
+                    
+                if update_status:
+                    if is_in_debounced:
+                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == target else now
+                        if entry > 0.0 and (now - entry >= 0.2):
+                            if not self._hit_registered.get(target, {}).get(side, False):
+                                self.hit_count += 1
+                                if target not in self._hit_registered:
+                                    self._hit_registered[target] = {"left": False, "right": False}
+                                self._hit_registered[target][side] = True
+                                self.log_debug(f"Multi-trigger hit counted for {side} hand in {target}. Hit count: {self.hit_count}/{count_needed}", self.product_id)
+                    else:
+                        if target in self._hit_registered:
+                            self._hit_registered[target][side] = False
+                    self.last_trigger_states[side] = is_in_debounced
+                    
             if not update_status:
                 if mode == "both":
-                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
-                           self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 return any_in
-            
+                
             # Cho phép hoàn thành chu kỳ bằng 1 trigger + rút tay cho bước đầu tiên (đặc trưng của TFF4040)
             if self.current_step_idx == 0:
                 if self.hit_count >= count_needed:
                     return True
-                if self.hit_count >= 1 and not any_in:
+                s1_any_in = False
+                for side in ["left", "right"]:
+                    if self.last_trigger_states.get(side, False):
+                        s1_any_in = True
+                if self.hit_count >= 1 and not s1_any_in:
                     return True
                 return False
                 
             return self.hit_count >= count_needed
+            
         elif logic == "dual_task":
             l_zone, r_zone = step.get("left_zone"), step.get("right_zone")
             if not update_status:
-                cond1 = self._is_in_zone("left", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
-                        self._is_in_zone("right", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor)
-                cond2 = self._is_in_zone("right", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
-                        self._is_in_zone("left", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                cond1 = self._is_in_zone("left", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor) and                         self._is_in_zone("right", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                cond2 = self._is_in_zone("right", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor) and                         self._is_in_zone("left", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 return cond1 or cond2
 
-            # Khởi tạo trạng thái tích lũy nếu chưa có trong last_trigger_states
-            if "dual_left_in_l" not in self.last_trigger_states:
-                self.last_trigger_states["dual_left_in_l"] = False
-                self.last_trigger_states["dual_right_in_r"] = False
-                self.last_trigger_states["dual_right_in_l"] = False
-                self.last_trigger_states["dual_left_in_r"] = False
+            # Chỉ ghi nhận kích hoạt khi tay giữ trong vùng ít nhất 0.2s
+            for side in ["left", "right"]:
+                for z in [l_zone, r_zone]:
+                    if self._is_in_zone(side, z, centroid_only=centroid_only, shrink_factor=shrink_factor):
+                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
+                        if entry > 0.0 and (now - entry >= 0.2):
+                            if side == "left" and z == l_zone:
+                                self.last_trigger_states["dual_left_in_l"] = True
+                            if side == "right" and z == r_zone:
+                                self.last_trigger_states["dual_right_in_r"] = True
+                            if side == "right" and z == l_zone:
+                                self.last_trigger_states["dual_right_in_l"] = True
+                            if side == "left" and z == r_zone:
+                                self.last_trigger_states["dual_left_in_r"] = True
 
-            # Cập nhật trạng thái khi phát hiện tay trong vùng
-            if self._is_in_zone("left", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor):
-                self.last_trigger_states["dual_left_in_l"] = True
-            if self._is_in_zone("right", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor):
-                self.last_trigger_states["dual_right_in_r"] = True
-            if self._is_in_zone("right", l_zone, centroid_only=centroid_only, shrink_factor=shrink_factor):
-                self.last_trigger_states["dual_right_in_l"] = True
-            if self._is_in_zone("left", r_zone, centroid_only=centroid_only, shrink_factor=shrink_factor):
-                self.last_trigger_states["dual_left_in_r"] = True
-
-            # Trạng thái hoàn thành: hoặc đúng chiều (Trái-Trái và Phải-Giữa), hoặc ngược chiều (Phải-Trái và Trái-Giữa)
-            normal_match = self.last_trigger_states["dual_left_in_l"] and self.last_trigger_states["dual_right_in_r"]
-            swapped_match = self.last_trigger_states["dual_right_in_l"] and self.last_trigger_states["dual_left_in_r"]
-            
+            normal_match = self.last_trigger_states.get("dual_left_in_l", False) and self.last_trigger_states.get("dual_right_in_r", False)
+            swapped_match = self.last_trigger_states.get("dual_right_in_l", False) and self.last_trigger_states.get("dual_left_in_r", False)
             return normal_match or swapped_match
         return False
-
     def _is_in_zone(self, side: str, zone_name: str, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:
         zone_pts = self.zones.get(zone_name)
         if not zone_pts: return False
