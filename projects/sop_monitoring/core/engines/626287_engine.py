@@ -78,7 +78,8 @@ class ProductEngine(BaseEngine):
         step_1 = self.sop_steps[0]
         s1_zones = self._get_all_zones_for_step(step_1)
         is_currently_in_s1 = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in s1_zones)
-        self.s1_withdrawn = not is_currently_in_s1
+        if not is_currently_in_s1:
+            self.s1_withdrawn = True
         
         # 1. Cập nhật vị trí
         active_zones = {"left": None, "right": None}
@@ -207,7 +208,7 @@ class ProductEngine(BaseEngine):
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
-            if self.current_step_idx > 0:
+            if self.current_step_idx > 0 and self.s1_withdrawn:
                 step_1 = self.sop_steps[0]
                 s1_zones = self._get_all_zones_for_step(step_1)
                 

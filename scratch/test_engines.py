@@ -120,20 +120,33 @@ def run_test():
     
     # Step 6
     print("--- Step 6 (multi_trigger, required_count 4) ---")
-    for i in range(4):
+    for i in range(3):
         res = update_sustained(engine, [get_hand_in_zone("left", mold_center)])
         print_engine_state(f"Step 6 - trigger {i+1}", res, engine)
         time.sleep(0.35)
         res = engine.update([])
         print_engine_state(f"Step 6 - withdraw {i+1}", res, engine)
-    time.sleep(0.35)
-    res = engine.update([])
-    print_engine_state("Step 6 - finalize", res, engine)
-    assert engine.current_step_idx == 6
     
-    # Step 7
+    # 4th trigger: complete Step 6 but keep hand in mold
+    res = update_sustained(engine, [get_hand_in_zone("left", mold_center)])
+    print_engine_state("Step 6 - trigger 4 (completed)", res, engine)
+    assert engine.current_step_idx == 6 # now at Step 7
+    
+    # Now hand remains in mold for more than 1.0 second (e.g. 1.2 seconds)
+    print("--- Simulating hand remaining in mold for 1.2s without withdrawal ---")
+    time.sleep(1.2)
+    res = engine.update([get_hand_in_zone("left", mold_center)])
+    print_engine_state("Step 7 - Hand still in mold after 1.2s", res, engine)
+    assert engine.current_step_idx == 6 # Should still be at Step 7, NOT reset!
+    
+    # Now withdraw hand
+    res = engine.update([])
+    print_engine_state("Step 7 - Hand withdrawn", res, engine)
+    assert engine.s1_withdrawn == True
+    
+    # Step 7: Press right button
     res = update_sustained(engine, [get_hand_in_zone("left", button_right_center)])
-    print_engine_state("Step 7", res, engine)
+    print_engine_state("Step 7 - press button", res, engine)
     assert engine.current_step_idx == 7
 
     # Test Auto-reset when hand returns to mold during Step 7
