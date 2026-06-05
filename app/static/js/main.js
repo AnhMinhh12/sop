@@ -264,7 +264,7 @@ async function loadStats(date, cameraId = "", productId = "") {
         const summaryRes = await fetch(`/api/stats/summary?${filter}`);
         const summary = await summaryRes.json();
         document.getElementById('total-violations').innerText = summary.total_violations;
-        document.getElementById('total-completions').innerText = summary.total_completions;
+        document.getElementById('total-completions').innerText = `${summary.total_completions}/2270`;
         document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
 
         // 2. Pie Chart
