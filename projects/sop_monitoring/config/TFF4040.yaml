@@ -65,7 +65,7 @@ steps:
     logic: "zone_trigger"
     required_zone: "button_right"
     active_hand: "any"
-    min_dwell_sec: 0.2
+    min_dwell_sec: 0.05
 
   - step_order: 8
     step_name: "Lấy Jig (Trái) & SP (Phải)"

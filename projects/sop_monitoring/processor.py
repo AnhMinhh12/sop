@@ -74,6 +74,7 @@ class FrameProcessor:
         self.latest_status = {"sop_status": "idle", "progress_percent": 0}
         self.sop_config = None
         self._loop_count = 0
+        self.last_step_idx = -1
         self._cached_hands = []
         self._last_hands_update_time = 0.0
         self.thread = None
@@ -146,11 +147,17 @@ class FrameProcessor:
             self.current_processed_frame = display_frame
             self._loop_count += 1
             
-            # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame)
+            # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
             is_completed = self.latest_status.get("sop_status") == "completed"
             is_violation = self.latest_status.get("sop_status") == "violation"
-            if is_completed:
-                if not self._completion_logged:
+            step_changed = False
+            curr_idx = self.engine.current_step_idx if hasattr(self.engine, 'current_step_idx') else -1
+            if curr_idx != self.last_step_idx:
+                self.last_step_idx = curr_idx
+                step_changed = True
+
+            if is_completed or step_changed:
+                if is_completed and not self._completion_logged:
                     self._handle_completion()
                     self._completion_logged = True
                 emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))

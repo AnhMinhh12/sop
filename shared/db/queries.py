@@ -339,6 +339,64 @@ class EventQueries:
             if 'conn' in locals(): conn.close()
 
     @staticmethod
+    def get_hourly_stats(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lấy số liệu vi phạm và hoàn thành theo từng giờ trong ngày target_date."""
+        if camera_id == "undefined" or not camera_id:
+            camera_id = None
+        if product_id == "undefined" or not product_id:
+            product_id = None
+            
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            where_clause = "WHERE DATE(e.timestamp) = %s"
+            params = [target_date]
+            
+            if camera_id:
+                where_clause += " AND c.station_id = %s"
+                params.append(camera_id)
+            if product_id:
+                if product_id == "TFF4040":
+                    where_clause += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clause += " AND (d.name LIKE %s)"
+                    params.append("%626287%")
+                else:
+                    where_clause += " AND (d.name LIKE %s OR d.name = %s)"
+                    params.extend([f"%{product_id}%", product_id])
+
+            cursor.execute(f"""
+                SELECT HOUR(e.timestamp) as hr,
+                       SUM(CASE WHEN e.sop_status = 'violation' THEN 1 ELSE 0 END) as violations,
+                       SUM(CASE WHEN e.sop_status = 'completed' THEN 1 ELSE 0 END) as completions
+                FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
+                {where_clause}
+                GROUP BY HOUR(e.timestamp)
+                ORDER BY hr
+            """, tuple(params))
+            
+            db_data = {row["hr"]: {"violations": int(row["violations"]), "completions": int(row["completions"])} for row in cursor.fetchall()}
+            
+            hourly = []
+            for h in range(24):
+                data = db_data.get(h, {"violations": 0, "completions": 0})
+                hourly.append({
+                    "hour": f"{h:02d}:00",
+                    "violations": data["violations"],
+                    "completions": data["completions"]
+                })
+            return hourly
+        except Exception as e:
+            logger.error(f"DB Error getting hourly stats: {e}")
+            return [{"hour": f"{h:02d}:00", "violations": 0, "completions": 0} for h in range(24)]
+        finally:
+            if 'cursor' in locals() and cursor: cursor.close()
+            if 'conn' in locals() and conn: conn.close()
+
+    @staticmethod
     def get_events_by_camera(camera_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Truy vấn vi phạm theo camera station_id.

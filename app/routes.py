@@ -227,6 +227,15 @@ def get_stat_distribution():
     return jsonify(dist)
 
 
+@app.route('/api/stats/hourly')
+def get_stat_hourly():
+    target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
+    camera_id = request.args.get('camera_id')
+    product_id = request.args.get('product_id')
+    hourly = EventQueries.get_hourly_stats(target_date, camera_id=camera_id, product_id=product_id)
+    return jsonify(hourly)
+
+
 @app.route('/api/stats/violations')
 def get_violation_stats():
     """Thống kê vi phạm theo loại (Tổng tất cả)."""

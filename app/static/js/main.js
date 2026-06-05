@@ -9,6 +9,7 @@ let violationChart = null;
 let healthInterval = null;
 let pieChart = null;
 let lineChart = null;
+let hourlyChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof initSpaNavigation === 'function') initSpaNavigation();
@@ -179,14 +180,14 @@ async function loadHistory(stationId = '', productId = '', date = '') {
         }
 
         events.forEach(ev => {
-            const typeMap = { 
-                'skip_step': 'Bỏ bước', 
-                'timeout': 'Quá giờ', 
-                'wrong_step': 'Sai bước', 
-                'premature_restart': 'Bỏ bước',
-                'success': 'Hoàn thành' 
-            };
-            const vTypeVN = typeMap[ev.violation_type] || ev.violation_type;
+            let vTypeVN = "";
+            if (ev.violation_type === 'success' || ev.sop_status === 'completed') {
+                vTypeVN = 'Hoàn thành';
+            } else if (ev.violation_type === 'timeout' || ev.violation_type === 'idle_timeout') {
+                vTypeVN = 'Quá giờ';
+            } else {
+                vTypeVN = 'Sai thao tác';
+            }
             const isViolation = ev.sop_status === 'violation';
             const row = document.createElement('tr');
             row.className = 'event-row';
@@ -214,7 +215,8 @@ async function initStatsPage(selectedId = "") {
     const dateInput = document.getElementById('target-date');
     if (!dateInput) return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     dateInput.value = today;
 
     // Load filter options if empty
@@ -276,35 +278,50 @@ async function loadStats(date, cameraId = "", productId = "") {
         const trendRes = await fetch(`/api/stats/trend?${filter}`);
         const trendData = await trendRes.json();
         renderLineChart(trendData);
+
+        // 4. Hourly Chart
+        const hourlyRes = await fetch(`/api/stats/hourly?${filter}`);
+        const hourlyData = await hourlyRes.json();
+        renderHourlyChart(hourlyData);
     } catch (err) { console.error(err); }
 }
 
 function renderPieChart(data) {
     const ctx = document.getElementById('violationPieChart').getContext('2d');
     if (pieChart) pieChart.destroy();
-    const labels = Object.keys(data);
-    const values = Object.values(data);
     
-    const typeMap = { 
-        'skip_step': 'Bỏ bước', 
-        'timeout': 'Quá giờ', 
-        'wrong_step': 'Sai bước', 
-        'premature_restart': 'Bỏ bước',
-        'idle_timeout': 'Nghỉ quá lâu'
-    };
-    const typeColors = { 
-        'skip_step': '#ef4444', 
-        'timeout': '#f59e0b', 
-        'wrong_step': '#6366f1', 
-        'premature_restart': '#ef4444',
-        'idle_timeout': '#64748b'
-    };
-
+    let saiThaoTac = 0;
+    let quaGio = 0;
+    
+    Object.keys(data).forEach(key => {
+        const val = data[key];
+        if (key === 'timeout' || key === 'idle_timeout') {
+            quaGio += val;
+        } else if (key !== 'success') {
+            saiThaoTac += val;
+        }
+    });
+    
+    const labels = [];
+    const values = [];
+    const colors = [];
+    
+    if (saiThaoTac > 0) {
+        labels.push('Sai thao tác');
+        values.push(saiThaoTac);
+        colors.push('#ef4444');
+    }
+    if (quaGio > 0) {
+        labels.push('Quá giờ');
+        values.push(quaGio);
+        colors.push('#f59e0b');
+    }
+    
     pieChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: labels.map(l => typeMap[l] || l),
-            datasets: [{ data: values, backgroundColor: labels.map(l => typeColors[l] || '#94a3b8'), borderWidth: 0 }]
+            labels: labels,
+            datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }]
         },
         options: { responsive: true, plugins: { legend: { position: 'bottom' } }, cutout: '70%' }
     });
@@ -341,13 +358,75 @@ function renderLineChart(data) {
             } 
         }
     });
-
-    if (data.length > 0) {
+    if (data && data.length > 0) {
         const trendTitle = document.getElementById('trend-title');
         if (trendTitle) {
             trendTitle.innerText = `Xu hướng tuần (${data[0].date} đến ${data[data.length - 1].date})`;
         }
     }
+}
+
+function renderHourlyChart(data) {
+    const ctx = document.getElementById('hourlyStatsChart').getContext('2d');
+    if (hourlyChart) hourlyChart.destroy();
+
+    const labels = data.map(d => d.hour);
+    const completions = data.map(d => d.completions);
+    const violations = data.map(d => d.violations);
+
+    hourlyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Số chu kỳ hoàn thành',
+                    data: completions,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#10b981'
+                },
+                {
+                    label: 'Số lỗi vi phạm',
+                    data: violations,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#ef4444'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 12 }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        precision: 0
+                    }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            }
+        }
+    });
 }
 
 /* --- LOGIC DASHBOARD & CAMERA --- */
@@ -596,6 +675,16 @@ function showToast(title, message, type = 'info') {
 socket.on('step_update', (data) => {
     const { camera_id, cycle_count, current_step, status_msg, progress_percent, step_index } = data;
     
+    // --- CẬP NHẬT TRANG THỐNG KÊ REALTIME ---
+    if (data.sop_status === 'completed' || data.sop_status === 'violation') {
+        const statsDateInput = document.getElementById('target-date');
+        if (statsDateInput) {
+            const statsStationSelect = document.getElementById('filter-station');
+            const statsProductSelect = document.getElementById('filter-product');
+            loadStats(statsDateInput.value, statsStationSelect ? statsStationSelect.value : "", statsProductSelect ? statsProductSelect.value : "");
+        }
+    }
+
     // Cập nhật Progress Bar & Tiêu đề
     const fill = document.getElementById(`progress-${camera_id}`);
     const label = document.getElementById(`step-name-${camera_id}`);

@@ -438,7 +438,8 @@ class ProductEngine(BaseEngine):
                 is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 if is_in:
                     entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == target else now
-                    if entry > 0.0 and (now - entry >= 0.2):
+                    required_dwell = step.get("min_dwell_sec", 0.2)
+                    if entry > 0.0 and (now - entry >= required_dwell):
                         if update_status:
                             self._zone_triggered[target][side] = True
                             
@@ -518,8 +519,8 @@ class ProductEngine(BaseEngine):
                     return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 return any_in
                 
-            # Cho phép hoàn thành chu kỳ bằng 1 trigger + rút tay cho bước đầu tiên (đặc trưng của TFF4040)
-            if self.current_step_idx == 0:
+            # Cho phép hoàn thành bằng 1 trigger + rút tay cho các bước lấy 2 SP/Slider từ khuôn (bước 1 và 3)
+            if self.current_step_idx in [0, 2]:
                 if self.hit_count >= count_needed:
                     return True
                 s1_any_in = False
