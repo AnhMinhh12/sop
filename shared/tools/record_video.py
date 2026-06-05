@@ -94,6 +94,7 @@ def main():
         out_file += '.mp4'
         
     out_path = out_dir / out_file
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     
     # 3. Thiet lap thoi gian quay va preview
     duration_input = input("Nhap thoi gian quay (giay) - De trong neu muon quay vo han va nhan 'q' de dung: ").strip()
@@ -178,6 +179,11 @@ def main():
         out = cv2.VideoWriter(str(out_path), fourcc, fps, (write_width, write_height), [cv2.VIDEOWRITER_PROP_QUALITY, 95])
     except Exception:
         out = cv2.VideoWriter(str(out_path), fourcc, fps, (write_width, write_height))
+        
+    if not out.isOpened():
+        print(f"❌ LOI: Khong the khoi tao VideoWriter! Vui long kiem tra lai quyen ghi hoac duong dan: {out_path.resolve()}")
+        cap.release()
+        return
     
     import queue
     import threading
