@@ -149,10 +149,10 @@ def run_test():
     print_engine_state("Step 7 - press button", res, engine)
     assert engine.current_step_idx == 7
 
-    # Test Auto-reset when hand returns to mold during Step 7
+    # Test Auto-reset is NOT triggered when current_step_idx > restart_threshold (Step 7)
     res = update_sustained(engine, [get_hand_in_zone("left", mold_center)], duration=0.35)
-    print_engine_state("Test Auto-Reset when hand returns to mold during Step 7", res, engine)
-    assert engine.current_step_idx == 0
+    print_engine_state("Test Auto-Reset NOT triggered during Step 7", res, engine)
+    assert engine.current_step_idx == 7
     assert res["sop_status"] == "processing"
 
     # Test Violation Reset

@@ -831,6 +831,91 @@ header {
     letter-spacing: -0.01em;
 }
 
+/* Countdown Banner Style replacing status-banner */
+.countdown-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(15, 23, 42, 0.03);
+    padding: 14px 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 1.5rem;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(5px);
+    transition: all 0.3s ease;
+}
+
+/* Alert styles for countdown timer states */
+.countdown-banner.state-normal {
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.2);
+}
+.countdown-banner.state-warning {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+}
+.countdown-banner.state-danger {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.countdown-timer-icon {
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.countdown-progress-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.countdown-text-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.countdown-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.countdown-value {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--text-main);
+    font-family: monospace;
+}
+
+.countdown-bar-bg {
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.countdown-bar-fill {
+    height: 100%;
+    width: 100%;
+    background: var(--success);
+    border-radius: 4px;
+    transition: width 0.1s linear, background-color 0.3s ease;
+}
+
+/* Dynamic colors for the fill bar */
+.countdown-bar-fill.warning {
+    background: var(--warning);
+}
+
+.countdown-bar-fill.danger {
+    background: var(--danger);
+}
+
 .modern-select {
     width: 100%;
     padding: 12px 16px;

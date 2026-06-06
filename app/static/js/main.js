@@ -197,8 +197,6 @@ async function loadHistory(stationId = '', productId = '', date = '') {
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
                 <td><span class="event-type ${isViolation ? 'text-danger' : 'text-secondary'}">${vTypeVN}</span></td>
                 <td>${ev.expected_step || '-'}</td>
-                <td>${ev.step_detected || '-'}</td>
-                <td>${(ev.confidence * 100).toFixed(1)}%</td>
                 <td>
                     ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
                 </td>
@@ -266,7 +264,7 @@ async function loadStats(date, cameraId = "", productId = "") {
         const summaryRes = await fetch(`/api/stats/summary?${filter}`);
         const summary = await summaryRes.json();
         document.getElementById('total-violations').innerText = summary.total_violations;
-        document.getElementById('total-completions').innerText = `${summary.total_completions}/2270`;
+        document.getElementById('total-completions').innerText = `${summary.total_completions * 2}/4540`;
         document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
 
         // 2. Pie Chart
@@ -371,7 +369,7 @@ function renderHourlyChart(data) {
     if (hourlyChart) hourlyChart.destroy();
 
     const labels = data.map(d => d.hour);
-    const completions = data.map(d => d.completions);
+    const completions = data.map(d => d.completions * 2);
     const violations = data.map(d => d.violations);
 
     hourlyChart = new Chart(ctx, {
@@ -380,7 +378,7 @@ function renderHourlyChart(data) {
             labels: labels,
             datasets: [
                 {
-                    label: 'Số chu kỳ hoàn thành',
+                    label: 'Số sản phẩm hoàn thành',
                     data: completions,
                     borderColor: '#10b981',
                     backgroundColor: 'rgba(16, 185, 129, 0.05)',
@@ -479,10 +477,21 @@ function renderStationDetail(cam) {
                     </select>
                 </div>
 
-                <!-- Thanh trạng thái được trang trí lại và đưa lên trên -->
-                <div class="status-banner">
-                    <div class="status-icon">🔔</div>
-                    <div id="status-msg-${cam.id}" class="status-text">Hệ thống sẵn sàng</div>
+                <!-- Countdown Banner replacing status-banner -->
+                <div class="countdown-banner state-normal" id="countdown-banner-${cam.id}">
+                    <div class="countdown-timer-icon" id="countdown-icon-${cam.id}">⏱️</div>
+                    <div class="countdown-progress-container">
+                        <div class="countdown-text-row">
+                            <span class="countdown-label">
+                                <span id="countdown-label-${cam.id}">Chu kỳ:</span> 
+                                <span id="status-msg-${cam.id}" class="status-text font-bold ml-2">Hệ thống sẵn sàng</span>
+                            </span>
+                            <span id="countdown-val-${cam.id}" class="countdown-value">38.0s</span>
+                        </div>
+                        <div class="countdown-bar-bg">
+                            <div id="countdown-bar-fill-${cam.id}" class="countdown-bar-fill" style="width: 100%"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="progress-section">
@@ -673,7 +682,7 @@ function showToast(title, message, type = 'info') {
 
 // Socket IO logic giữ nguyên
 socket.on('step_update', (data) => {
-    const { camera_id, cycle_count, current_step, status_msg, progress_percent, step_index } = data;
+    const { camera_id, cycle_count, current_step, status_msg, progress_percent, step_index, cycle_time_left } = data;
     
     // --- CẬP NHẬT TRANG THỐNG KÊ REALTIME ---
     if (data.sop_status === 'completed' || data.sop_status === 'violation') {
@@ -702,6 +711,59 @@ socket.on('step_update', (data) => {
         statusIndicator.innerText = "STREAMING";
         statusIndicator.style.background = "#dcfce7";
         statusIndicator.style.color = "#15803d";
+    }
+
+    // Cập nhật Countdown Timer
+    const countdownVal = document.getElementById(`countdown-val-${camera_id}`);
+    const countdownFill = document.getElementById(`countdown-bar-fill-${camera_id}`);
+    const countdownBanner = document.getElementById(`countdown-banner-${camera_id}`);
+    const countdownLabel = document.getElementById(`countdown-label-${camera_id}`);
+    const countdownIcon = document.getElementById(`countdown-icon-${camera_id}`);
+
+    if (cycle_time_left !== undefined) {
+        if (countdownVal) countdownVal.innerText = `${cycle_time_left.toFixed(1)}s`;
+        if (countdownFill) {
+            const percentage = (cycle_time_left / 38.0) * 100;
+            countdownFill.style.width = `${percentage}%`;
+            
+            // Remove previous classes
+            countdownFill.classList.remove('warning', 'danger');
+            if (countdownBanner) {
+                countdownBanner.classList.remove('state-normal', 'state-warning', 'state-danger');
+            }
+
+            if (data.sop_status === 'violation') {
+                countdownFill.classList.add('danger');
+                if (countdownBanner) countdownBanner.classList.add('state-danger');
+                if (countdownVal) countdownVal.innerText = `TIMEOUT`;
+                if (countdownLabel) countdownLabel.innerText = `Lỗi quá giờ: `;
+                if (countdownIcon) countdownIcon.innerText = `🚨`;
+            } else if (cycle_time_left <= 5.0) {
+                countdownFill.classList.add('danger');
+                if (countdownBanner) countdownBanner.classList.add('state-danger');
+                if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
+                if (countdownIcon) countdownIcon.innerText = `⚠️`;
+            } else if (cycle_time_left <= 15.0) {
+                countdownFill.classList.add('warning');
+                if (countdownBanner) countdownBanner.classList.add('state-warning');
+                if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
+                if (countdownIcon) countdownIcon.innerText = `⏱️`;
+            } else {
+                if (countdownBanner) countdownBanner.classList.add('state-normal');
+                if (countdownLabel) {
+                    if (data.sop_status === 'idle') {
+                        countdownLabel.innerText = `Chu kỳ tiếp theo: `;
+                        if (countdownIcon) countdownIcon.innerText = `⏱️`;
+                    } else if (data.sop_status === 'completed') {
+                        countdownLabel.innerText = `Hoàn thành chu kỳ! `;
+                        if (countdownIcon) countdownIcon.innerText = `✅`;
+                    } else {
+                        countdownLabel.innerText = `Chu kỳ: `;
+                        if (countdownIcon) countdownIcon.innerText = `⏱️`;
+                    }
+                }
+            }
+        }
     }
 
     // --- LOGIC TÍCH CHỌN CHECKLIST ---

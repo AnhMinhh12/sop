@@ -65,6 +65,7 @@ class ProductEngine(BaseEngine):
         self.cycle_count = 0
         self.s1_withdrawn = True
         self.start_zone_entry_time = 0.0
+        self.cycle_start_time = 0.0
         
         logger.info(f"ProductEngine [626287]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
@@ -170,6 +171,7 @@ class ProductEngine(BaseEngine):
                 self.reset(now=now)
                 self.cycle_count += 1
                 self.waiting_for_start = False
+                self.cycle_start_time = now
                 self.start_zone_entry_time = 0
             else:
                 return self._get_status_result(active_zones, "violation", violation_type=self.violation_type)
@@ -185,6 +187,7 @@ class ProductEngine(BaseEngine):
                         self.start_zone_entry_time = now
                     if now - self.start_zone_entry_time >= 0.3:
                         self.waiting_for_start = False
+                        self.cycle_start_time = now
                         self.cycle_count += 1
                         self.step_start_time = now
                         self.last_completed_time = now
@@ -198,6 +201,15 @@ class ProductEngine(BaseEngine):
                     self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
 
+            # Lỗi vi phạm quá thời gian chu kỳ (38 giây kể từ lúc bắt đầu chu kỳ)
+            cycle_elapsed = now - self.cycle_start_time
+            if cycle_elapsed > 38.0:
+                self.is_failed = True
+                self.violation_type = "timeout"
+                self.failed_step_idx = self.current_step_idx
+                self.log_debug(f"VIOLATION: Cycle Timeout (>38s) at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
+                return self._get_status_result(active_zones, "violation", violation_type="timeout")
+
             elapsed = now - self.step_start_time
             timeout_limit = current_step.get("timeout_sec", self.config.get("transition_timeout_sec", 15.0))
             if elapsed > timeout_limit:
@@ -208,7 +220,7 @@ class ProductEngine(BaseEngine):
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
-            if self.current_step_idx > 0 and self.s1_withdrawn:
+            if 0 < self.current_step_idx <= self.restart_threshold and self.s1_withdrawn:
                 step_1 = self.sop_steps[0]
                 s1_zones = self._get_all_zones_for_step(step_1)
                 
@@ -241,6 +253,7 @@ class ProductEngine(BaseEngine):
                                 self.reset(now=now)
                                 self.cycle_count += 1
                                 self.waiting_for_start = False
+                                self.cycle_start_time = now
                                 self.start_zone_entry_time = 0
                                 
                                 # Tính luôn bước 1 của chu kỳ mới cho frame này từ chính hands_data hiện tại
@@ -333,6 +346,7 @@ class ProductEngine(BaseEngine):
         self.reset_dwell_start = 0
         self.s1_withdrawn = True
         self.start_zone_entry_time = 0.0
+        self.cycle_start_time = 0.0
         self.log_debug("ENGINE RESET", self.product_id)
 
     def get_status(self) -> Dict[str, Any]:
@@ -373,6 +387,15 @@ class ProductEngine(BaseEngine):
             if zone: detected_parts.append(f"{side[0].upper()}:{zone}")
         detected_label = ", ".join(detected_parts) if detected_parts else "Idle"
 
+        if self.waiting_for_start:
+            cycle_time_left = 38.0
+        elif self.is_failed:
+            cycle_time_left = 0.0
+        elif self.current_step_idx >= len(self.sop_steps):
+            cycle_time_left = 0.0
+        else:
+            cycle_time_left = max(0.0, 38.0 - (self.last_update_time - self.cycle_start_time))
+
         res = {
             "sop_status": status,
             "status_msg": self.status_msg,
@@ -385,7 +408,8 @@ class ProductEngine(BaseEngine):
             "hit_count": self.hit_count,
             "cycle_count": self.cycle_count,
             "hands_info": active_zones,
-            "step_list": step_list
+            "step_list": step_list,
+            "cycle_time_left": cycle_time_left
         }
 
         if self.is_failed:
@@ -407,7 +431,8 @@ class ProductEngine(BaseEngine):
                 "sop_status": status,
                 "violation_type": self.violation_type or "skip_step",
                 "step_index": 0,
-                "progress_percent": 0
+                "progress_percent": 0,
+                "cycle_time_left": 0.0
             })
         return res
 

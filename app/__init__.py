@@ -33,7 +33,8 @@ def emit_step_update(camera_id, status_data, hands_detected):
         'confidence': status_data.get('confidence', 0),
         'sop_status': status_data.get('sop_status', 'idle'),
         'progress_percent': status_data.get('progress_percent', 0),
-        'hands_detected': hands_detected
+        'hands_detected': hands_detected,
+        'cycle_time_left': status_data.get('cycle_time_left', 38.0)
     })
 
 def emit_violation(camera_id, violation_data):
