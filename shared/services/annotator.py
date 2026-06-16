@@ -10,11 +10,10 @@ class Annotator:
     COLOR_TEXT = (255, 255, 255)
 
     @staticmethod
-    def draw_zones(frame: np.ndarray, zones: Dict[str, Any]):
+    def draw_zones(frame: np.ndarray, zones: Dict[str, Any], color: tuple = (0, 0, 255)):
         """Vẽ các vùng ROI (Chữ nhật hoặc Đa giác) lên màn hình."""
         h, w = frame.shape[:2]
         for name, pts in zones.items():
-            color = (255, 100, 0)
             if isinstance(pts[0], list): # Nếu là Đa giác (Polygon)
                 poly_pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in pts], np.int32)
                 cv2.polylines(frame, [poly_pts], True, color, 2)

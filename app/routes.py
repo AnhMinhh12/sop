@@ -45,26 +45,26 @@ def stats():
 
 def gen_frames(camera_id: str):
     """Máy phát luồng MJPEG cho trình duyệt — Tối ưu CPU."""
-    last_frame_id = None
+    last_loop_count = -1
     cached_bytes = None
     
     while True:
         if camera_id in processors:
-            frame = processors[camera_id].get_latest_frame()
-            if frame is not None:
-                # Chỉ encode lại khi frame thực sự thay đổi (tránh encode lại cùng 1 frame)
-                frame_id = id(frame)
-                if frame_id != last_frame_id:
+            proc = processors[camera_id]
+            loop_count = proc._loop_count
+            if loop_count != last_loop_count:
+                frame = proc.get_latest_frame()
+                if frame is not None:
                     try:
                         ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
                         cached_bytes = buffer.tobytes()
-                        last_frame_id = frame_id
+                        last_loop_count = loop_count
                     except Exception:
                         pass
                 
-                if cached_bytes:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + cached_bytes + b'\r\n')
+            if cached_bytes:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + cached_bytes + b'\r\n')
         # Giảm xuống ~10 FPS — Mắt người không phân biệt 10 vs 15 FPS trên dashboard
         time.sleep(0.1)
 
@@ -148,6 +148,8 @@ def get_station_products(camera_id):
             return "626287"
         if any(k in raw_name_lower for k in ["tff4040", "reformed", "test model", "sản phẩm a"]):
             return "TFF4040"
+        if "laprap" in raw_name_lower:
+            return "laprap"
         return None
 
     try:
@@ -176,6 +178,8 @@ def get_station_products(camera_id):
         clean_ids = set()
         if camera_id == "machine_07":
             clean_ids = {"TFF4040", "626287"}
+        elif camera_id == "machine_08":
+            clean_ids = {"laprap"}
         else:
             for p in products:
                 name = p.get("name", "")

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class ProductEngine(BaseEngine):
     """
-    Engine logic cho mã sản phẩm 626287.
+    Engine logic cho mã sản phẩm laprap.
     Thực hiện logic không gian dựa trên vùng (Zones).
     """
     def __init__(self, sop_config: Dict[str, Any]):
@@ -18,7 +18,7 @@ class ProductEngine(BaseEngine):
         self.zones = sop_config.get("zones", {})
         self.sop_steps = sop_config.get("steps", [])
         self.config = sop_config.get("config", {"w": 640, "h": 480})
-        self.product_id = "626287" # ID này được truyền từ loader
+        self.product_id = "laprap" # ID này được truyền từ loader
         self.restart_threshold = self.config.get("restart_allowed_until_step", len(self.sop_steps) // 2)
         
         # Sắp xếp vùng theo diện tích để ưu tiên vùng nhỏ
@@ -68,7 +68,7 @@ class ProductEngine(BaseEngine):
         self.start_zone_entry_time = 0.0
         self.cycle_start_time = 0.0
         
-        logger.info(f"ProductEngine [626287]: Initialized for station {self.station_id}")
+        logger.info(f"ProductEngine [laprap]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
     def update(self, hands_data: List[Dict], products_data: List[Dict] = None) -> Dict[str, Any]:
@@ -211,15 +211,6 @@ class ProductEngine(BaseEngine):
                 self.failed_step_idx = self.current_step_idx
                 self.log_debug(f"VIOLATION: Cycle Timeout (>38s) at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
-
-            elapsed = now - self.step_start_time
-            timeout_limit = current_step.get("timeout_sec", self.config.get("transition_timeout_sec", 15.0))
-            if elapsed > timeout_limit:
-                self.is_failed = True
-                self.violation_type = "timeout"
-                self.failed_step_idx = self.current_step_idx
-                self.log_debug(f"VIOLATION: Timeout at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
-                return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
             if 0 < self.current_step_idx <= self.restart_threshold and self.s1_withdrawn:
@@ -301,28 +292,8 @@ class ProductEngine(BaseEngine):
             else:
                 self.status_msg = f"Đang chờ: {current_step['step_name']}"
 
-            # Kiểm tra bỏ bước (Skip Step): Chỉ quan tâm đến bước tiếp theo
-            if (now - self.last_completed_time > 1.5):
-                if self.current_step_idx + 1 < len(self.sop_steps):
-                    next_step = self.sop_steps[self.current_step_idx + 1]
-                    next_zones = self._get_all_zones_for_step(next_step)
-                    
-                    if not (self.last_completed_zone in next_zones and (now - self.last_completed_time < 3.0)):
-                        # Cho phép check skip step nếu đã qua thời gian rút tay (1.5s) hoặc tay đã rời khỏi vùng đó
-                        has_withdrawn = (now - self.last_completed_time > 1.5) or not (self.last_completed_zone and any(self._is_in_zone(side, self.last_completed_zone) for side in ["left", "right"]))
-                        if has_withdrawn:
-                            if self._check_step_logic(next_step, now, update_status=False, centroid_only=True):
-                                self.skip_frames_counter += 1
-                                base_tolerance = self.config.get("violation_tolerance", 3)
-                                effective_tolerance = base_tolerance * 1.5
-                                
-                                if self.skip_frames_counter >= effective_tolerance:
-                                    self.is_failed = True
-                                    self.failed_step_idx = self.current_step_idx
-                                    self.log_debug(f"VIOLATION: Skip Step detected. Next step ({next_step['step_name']}) seen while at step {self.current_step_idx}", self.product_id)
-                                    return self._get_status_result(active_zones, "violation", violation_type="skip_step")
-                            else:
-                                self.skip_frames_counter = 0
+            # Đã tắt kiểm tra bỏ bước (Skip Step) theo yêu cầu chỉ bắt lỗi quá thời gian 38 giây tổng thể
+            pass
 
         return self._get_status_result(active_zones, "processing")
 
@@ -361,6 +332,12 @@ class ProductEngine(BaseEngine):
         self.last_completed_zone = step.get("required_zone")
         self.last_completed_time = now
         
+        # Nếu bước vừa hoàn thành là bước vô hạn thời gian (timeout_sec == -1), ta bù lại thời gian đã tiêu tốn cho chu kỳ
+        if step.get("timeout_sec") == -1:
+            time_spent = now - self.step_start_time
+            self.cycle_start_time += time_spent
+            self.log_debug(f"Infinite step completed. Adjusting cycle_start_time by +{time_spent:.2f}s", self.product_id)
+            
         # Nếu bước vừa hoàn thành có vùng trùng với Bước 1 thì đánh dấu s1_withdrawn = False
         step_1 = self.sop_steps[0]
         s1_zones = self._get_all_zones_for_step(step_1)

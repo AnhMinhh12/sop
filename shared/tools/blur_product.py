@@ -258,7 +258,7 @@ def main():
                     
         print(f"⏳ Dang khoi tao YOLO ONNX Engine tu: {abs_weights}...")
         InferenceEngine(model_path=abs_weights, num_threads=4, input_size=input_size)
-        detector = HandDetector(camera_id="blur_tool", confidence_threshold=0.15)
+        detector = HandDetector(camera_id="blur_tool", confidence_threshold=0.15, model_path=abs_weights)
         
         # Nhap do mo rong vung lam mo quanh tay
         print("\nNhap do mo rong vung lam mo quanh tay (%, mac dinh: 40):")
@@ -384,7 +384,7 @@ def main():
             mask = static_mask.copy()
             
             if choice == '4' and detector is not None:
-                # Chạy AI tìm tay trên frame hiện tại
+                # Chạy AI tìm tay và sản phẩm trên frame hiện tại
                 hands = detector.detect(frame)
                 
                 if hands:
@@ -393,31 +393,36 @@ def main():
                 else:
                     frames_since_detect += 1
                     
-                # Sử dụng thông tin tay (bao gồm cả cache nếu mới mất frame)
+                # Sử dụng thông tin tay/sản phẩm (bao gồm cả cache nếu mới mất frame)
                 if last_hands and frames_since_detect <= max_history_frames:
                     for h in last_hands:
                         bbox = h["bbox"] # [x1, y1, x2, y2]
                         x1, y1, x2, y2 = bbox
-                        w_box = x2 - x1
-                        h_box = y2 - y1
                         
-                        # Mở rộng hộp để che phủ sản phẩm đang cầm
-                        pad_w = int(w_box * pad_ratio)
-                        pad_h = int(h_box * pad_ratio)
-                        
-                        x1_pad = max(0, int(x1 - pad_w))
-                        y1_pad = max(0, int(y1 - pad_h))
-                        x2_pad = min(width, int(x2 + pad_w))
-                        y2_pad = min(height, int(y2 + pad_h))
-                        
-                        cv2.rectangle(mask, (x1_pad, y1_pad), (x2_pad, y2_pad), 255, -1)
+                        # Nếu là sản phẩm detected trực tiếp, che chính xác bbox sản phẩm
+                        if h.get("class") == "product":
+                            cv2.rectangle(mask, (int(x1), int(y1)), (int(x2), int(y2)), 255, -1)
+                        else:
+                            # Nếu là tay, mở rộng hộp để che phủ sản phẩm đang cầm
+                            w_box = x2 - x1
+                            h_box = y2 - y1
+                            pad_w = int(w_box * pad_ratio)
+                            pad_h = int(h_box * pad_ratio)
+                            
+                            x1_pad = max(0, int(x1 - pad_w))
+                            y1_pad = max(0, int(y1 - pad_h))
+                            x2_pad = min(width, int(x2 + pad_w))
+                            y2_pad = min(height, int(y2 + pad_h))
+                            cv2.rectangle(mask, (x1_pad, y1_pad), (x2_pad, y2_pad), 255, -1)
                         
                     # Nếu thấy từ 2 bàn tay trở lên, che cả khoảng không ở giữa (nơi thường là sản phẩm)
-                    if len(last_hands) >= 2:
-                        all_x1 = [h["bbox"][0] for h in last_hands]
-                        all_y1 = [h["bbox"][1] for h in last_hands]
-                        all_x2 = [h["bbox"][2] for h in last_hands]
-                        all_y2 = [h["bbox"][3] for h in last_hands]
+                    # Chỉ áp dụng cho nhãn tay ('hand')
+                    only_hands = [h for h in last_hands if h.get("class", "hand") == "hand"]
+                    if len(only_hands) >= 2:
+                        all_x1 = [h["bbox"][0] for h in only_hands]
+                        all_y1 = [h["bbox"][1] for h in only_hands]
+                        all_x2 = [h["bbox"][2] for h in only_hands]
+                        all_y2 = [h["bbox"][3] for h in only_hands]
                         
                         min_x = max(0, int(min(all_x1)))
                         min_y = max(0, int(min(all_y1)))

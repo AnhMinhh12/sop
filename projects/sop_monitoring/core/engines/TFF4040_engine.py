@@ -36,6 +36,7 @@ class ProductEngine(BaseEngine):
         self.last_update_time = 0.0
         self._completed_at = 0
         self.last_hands = []
+        self.last_products = []
         self.hand_dist = -1.0
         
         self.is_failed = False
@@ -50,6 +51,7 @@ class ProductEngine(BaseEngine):
             "left": {"zone": None, "entry_time": 0},
             "right": {"zone": None, "entry_time": 0}
         }
+        self.hand_last_seen = {"left": 0.0, "right": 0.0}
         
         self._zone_last_seen = {}
         self._stay_timer = {}
@@ -73,9 +75,10 @@ class ProductEngine(BaseEngine):
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
-    def update(self, hands_data: List[Dict]) -> Dict[str, Any]:
+    def update(self, hands_data: List[Dict], products_data: List[Dict] = None) -> Dict[str, Any]:
         now = time.time()
         self.last_hands = hands_data
+        self.last_products = products_data if products_data is not None else []
         
         # Cập nhật trạng thái rút tay của bước 1 cho frame sau, lưu trạng thái trước đó lại
         was_s1_withdrawn = self.s1_withdrawn
@@ -84,6 +87,22 @@ class ProductEngine(BaseEngine):
         is_currently_in_s1 = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in s1_zones)
         if not is_currently_in_s1:
             self.s1_withdrawn = True
+            
+        # Cập nhật thời gian nhìn thấy tay và xóa vùng nếu không xuất hiện quá 0.3s
+        seen_sides = set()
+        for hand in hands_data:
+            side = hand["label"].lower()
+            if side in ["left", "right"]:
+                self.hand_last_seen[side] = now
+                seen_sides.add(side)
+                
+        for side in ["left", "right"]:
+            if side not in seen_sides:
+                if self.hand_last_seen[side] > 0.0 and (now - self.hand_last_seen[side] > 0.3):
+                    if self.hand_states[side]["zone"] is not None:
+                        self.log_debug(f"Hand {side.upper()} lost for >0.3s. Clearing zone {self.hand_states[side]['zone']}.", self.product_id)
+                        self.hand_states[side]["zone"] = None
+                        self.hand_states[side]["entry_time"] = 0.0
         
         # 1. Cập nhật vị trí
         active_zones = {"left": None, "right": None}
@@ -183,6 +202,26 @@ class ProductEngine(BaseEngine):
             current_step = self.sop_steps[self.current_step_idx]
             current_zones = self._get_all_zones_for_step(current_step)
             is_in_current_area = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in current_zones)
+            
+            # Nới lỏng Bước 7: Nếu phát hiện tay ở vùng Bước 8 (left_table hoặc middle_table) và giữ vững >= 0.2s, tự động hoàn thành Bước 7
+            if self.current_step_idx == 6:
+                step_8_zones = ["left_table", "middle_table"]
+                is_in_s8_sustained = False
+                for side in ["left", "right"]:
+                    for z in step_8_zones:
+                        if self._is_in_zone(side, z):
+                            entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
+                            if entry > self.step_start_time and (now - entry >= 0.2):
+                                is_in_s8_sustained = True
+                                break
+                    if is_in_s8_sustained:
+                        break
+                if is_in_s8_sustained:
+                    self.log_debug("Tự động hoàn thành Bước 7 vì phát hiện tay đã ở vùng Bước 8.", self.product_id)
+                    self._complete_current_step(now)
+                    current_step = self.sop_steps[self.current_step_idx]
+                    current_zones = self._get_all_zones_for_step(current_step)
+                    is_in_current_area = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in current_zones)
             
             if self.waiting_for_start:
                 if is_in_current_area:
@@ -290,6 +329,40 @@ class ProductEngine(BaseEngine):
                             else:
                                 if not is_in_s1:
                                     self.start_zone_entry_time = 0
+            elif self.current_step_idx > self.restart_threshold and self.s1_withdrawn and (now - self.last_completed_time > 2.5) and not is_in_current_area:
+                step_1 = self.sop_steps[0]
+                s1_zones = self._get_all_zones_for_step(step_1)
+                
+                # Chỉ check nếu vùng Bước 1 không nằm trong các vùng bước hiện tại và vùng bước tiếp theo
+                if not any(z in current_zones for z in s1_zones):
+                    next_zones = []
+                    if self.current_step_idx + 1 < len(self.sop_steps):
+                        next_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx + 1])
+                    
+                    if not any(z in next_zones for z in s1_zones):
+                        # Tránh trùng lặp khi vừa hoàn thành bước trước
+                        if not any(z == self.last_completed_zone and (now - self.last_completed_time < 1.0) for z in s1_zones):
+                            is_in_s1 = any(self._is_in_zone(side, z, centroid_only=False) for side in ["left", "right"] for z in s1_zones)
+                            is_in_s1_sustained = False
+                            for side in ["left", "right"]:
+                                for z in s1_zones:
+                                    if self._is_in_zone(side, z):
+                                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
+                                        if entry > self.step_start_time and (now - entry >= 0.2):
+                                            is_in_s1_sustained = True
+                                            break
+                                if is_in_s1_sustained:
+                                    break
+                                    
+                            if is_in_s1_sustained:
+                                self.is_failed = True
+                                self.violation_type = "skip_step"
+                                self.failed_step_idx = self.current_step_idx
+                                self.log_debug(f"VIOLATION: Skip Step detected. Returned to Step 1 (mold) at step {self.current_step_idx}", self.product_id)
+                                return self._get_status_result(active_zones, "violation", violation_type="skip_step")
+                            else:
+                                if not is_in_s1:
+                                    self.start_zone_entry_time = 0
 
             if self._check_step_logic(current_step, now):
                 min_dwell = current_step.get("min_dwell_sec", self.config.get("min_step_dwell_sec", 0.3))
@@ -311,7 +384,7 @@ class ProductEngine(BaseEngine):
                     if not (self.last_completed_zone in next_zones and (now - self.last_completed_time < 3.0)):
                         # Cho phép check skip step nếu đã qua thời gian rút tay (1.5s) hoặc tay đã rời khỏi vùng đó
                         has_withdrawn = (now - self.last_completed_time > 1.5) or not (self.last_completed_zone and any(self._is_in_zone(side, self.last_completed_zone) for side in ["left", "right"]))
-                        if has_withdrawn:
+                        if has_withdrawn and not is_in_current_area:
                             if self._check_step_logic(next_step, now, update_status=False, centroid_only=True, shrink_factor=0.15):
                                 self.skip_frames_counter += 1
                                 base_tolerance = self.config.get("violation_tolerance", 3)
@@ -350,9 +423,13 @@ class ProductEngine(BaseEngine):
         self.reset_dwell_start = 0
         self.in_delayed_restart = False
         self.restart_step_idx = 0
-        self.s1_withdrawn = True
         self.start_zone_entry_time = 0.0
         self.cycle_start_time = 0.0
+        self.hand_states = {
+            "left": {"zone": None, "entry_time": 0.0},
+            "right": {"zone": None, "entry_time": 0.0}
+        }
+        self.hand_last_seen = {"left": 0.0, "right": 0.0}
         self.log_debug("ENGINE RESET", self.product_id)
 
     def get_status(self) -> Dict[str, Any]:
@@ -461,6 +538,9 @@ class ProductEngine(BaseEngine):
                 
             for side in ["left", "right"]:
                 is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                if is_in and step.get("require_product", False):
+                    if not self._is_product_in_zone(target):
+                        is_in = False
                 if is_in:
                     entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == target else now
                     required_dwell = step.get("min_dwell_sec", 0.2)
@@ -486,7 +566,11 @@ class ProductEngine(BaseEngine):
             mode = step.get("active_hand", "both")
             if target not in self._stay_timer: self._stay_timer[target] = {"left": 0, "right": 0}
             for side in ["left", "right"]:
-                if self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor):
+                is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                if is_in and step.get("require_product", False):
+                    if not self._is_product_in_zone(target):
+                        is_in = False
+                if is_in:
                     if self._stay_timer[target][side] == 0 and update_status: self._stay_timer[target][side] = now  
                 elif update_status: self._stay_timer[target][side] = 0 
             if mode == "any": return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
@@ -506,6 +590,9 @@ class ProductEngine(BaseEngine):
                 
             for side in ["left", "right"]:
                 is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                if is_in and step.get("require_product", False):
+                    if not self._is_product_in_zone(target):
+                        is_in = False
                 is_in_debounced = is_in
                 if not is_in and update_status:
                     last_seen = self._zone_last_seen[target].get(side, 0.0)
@@ -568,7 +655,11 @@ class ProductEngine(BaseEngine):
             # Chỉ ghi nhận kích hoạt khi tay giữ trong vùng ít nhất 0.2s
             for side in ["left", "right"]:
                 for z in [l_zone, r_zone]:
-                    if self._is_in_zone(side, z, centroid_only=centroid_only, shrink_factor=shrink_factor):
+                    is_in = self._is_in_zone(side, z, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    if is_in and step.get("require_product", False):
+                        if not self._is_product_in_zone(z):
+                            is_in = False
+                    if is_in:
                         entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
                         if entry > 0.0 and (now - entry >= 0.2):
                             if side == "left" and z == l_zone:
@@ -584,6 +675,33 @@ class ProductEngine(BaseEngine):
             swapped_match = self.last_trigger_states.get("dual_right_in_l", False) and self.last_trigger_states.get("dual_left_in_r", False)
             return normal_match or swapped_match
         return False
+    def _is_product_in_zone(self, zone_name: str) -> bool:
+        if not hasattr(self, 'last_products') or not self.last_products:
+            return False
+            
+        zone_pts = self.zones.get(zone_name)
+        if not zone_pts: return False
+        
+        poly = np.array(zone_pts, np.float32)
+        w, h = self.config.get("w", 640), self.config.get("h", 480)
+        for prod in self.last_products:
+            centroid = prod.get("centroid")
+            if not centroid:
+                bbox = prod["bbox"]
+                centroid = [(bbox[0] + bbox[2]) / 2 / w, (bbox[1] + bbox[3]) / 2 / h]
+            if cv2.pointPolygonTest(poly, (centroid[0], centroid[1]), False) >= 0:
+                return True
+            bbox = prod["bbox"]
+            points = [
+                [bbox[0]/w, bbox[1]/h],
+                [bbox[2]/w, bbox[1]/h],
+                [bbox[0]/w, bbox[3]/h],
+                [bbox[2]/w, bbox[3]/h]
+            ]
+            if any(cv2.pointPolygonTest(poly, (pt[0], pt[1]), False) >= 0 for pt in points):
+                return True
+        return False
+
     def _is_in_zone(self, side: str, zone_name: str, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:
         zone_pts = self.zones.get(zone_name)
         if not zone_pts: return False

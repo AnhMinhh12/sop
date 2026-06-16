@@ -49,7 +49,8 @@ class FrameProcessor:
         # Integrations — RTSPStream resize ngay tại nguồn để tiết kiệm CPU
         self.stream = RTSPStream(self.cam_id, self.rtsp_url, self.fps,
                                  target_width=self._target_w, target_height=self._target_h)
-        self.hand_detector = HandDetector(self.cam_id, confidence_threshold=0.15)
+        model_path = camera_config.get("yolo_model")
+        self.hand_detector = HandDetector(self.cam_id, confidence_threshold=0.15, model_path=model_path)
         # BỎ MediaPipe KeypointExtractor
 
         # Dynamic Engine
@@ -76,6 +77,7 @@ class FrameProcessor:
         self._loop_count = 0
         self.last_step_idx = -1
         self._cached_hands = []
+        self._cached_products = []
         self._last_hands_update_time = 0.0
         self.thread = None
 
@@ -110,8 +112,12 @@ class FrameProcessor:
             if self._loop_count % 2 == 0:
                 detections = self.hand_detector.detect(frame)
                 
+                # Phân tách detections thành tay và sản phẩm (mặc định nếu thiếu key class là hand)
+                hand_dets = [d for d in detections if d.get("class", "hand") == "hand"]
+                self._cached_products = [d for d in detections if d.get("class") == "product"]
+                
                 # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
-                filtered_dets = self._filter_detections_by_roi(detections)
+                filtered_dets = self._filter_detections_by_roi(hand_dets)
                 
                 # 2. Bám vết và định danh tay Trái/Phải để tránh nhảy box khi có người khác
                 hands_data = self._associate_hands(filtered_dets)
@@ -123,10 +129,11 @@ class FrameProcessor:
             # Điều này ngăn việc engine nhận diện nhầm khi công nhân đã rút tay ra nhưng AI chưa update.
             if loop_start - self._last_hands_update_time > 0.3:
                 self._cached_hands = []
+                self._cached_products = []
                 hands_data = []
 
             # 3. Dynamic Engine Update
-            self.latest_status = self.engine.update(hands_data)
+            self.latest_status = self.engine.update(hands_data, self._cached_products)
             
             # 4. Check Violation
             violation = self.violation_detector.analyze(self.latest_status)
@@ -143,6 +150,14 @@ class FrameProcessor:
                 bbox = h["bbox"]
                 color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
                 cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
+                
+            # Vẽ sản phẩm (nếu được phát hiện) bằng màu cam cho laprap, xanh dương cho các máy khác
+            prod_color = (0, 128, 255) if getattr(self.engine, "product_id", None) == "laprap" else (255, 0, 0)
+            for p in self._cached_products:
+                bbox = p["bbox"]
+                cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), prod_color, 2)
+                cv2.putText(display_frame, "Product", (int(bbox[0]), int(bbox[1] - 5)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
 
             self.current_processed_frame = display_frame
             self._loop_count += 1

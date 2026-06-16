@@ -15,8 +15,8 @@ class BaseEngine(ABC):
         pass
 
     @abstractmethod
-    def update(self, hands_data: List[Dict]) -> Dict[str, Any]:
-        """Xử lý dữ liệu bàn tay và trả về trạng thái SOP."""
+    def update(self, hands_data: List[Dict], products_data: List[Dict] = None) -> Dict[str, Any]:
+        """Xử lý dữ liệu bàn tay và sản phẩm, trả về trạng thái SOP."""
         pass
 
     def log_debug(self, message: str, product_id: str):

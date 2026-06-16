@@ -11,6 +11,9 @@ products:
   - id: "626287"
     name: "626287"
     sop_file: "projects/sop_monitoring/config/626287.yaml"
+  - id: "laprap"
+    name: "laprap"
+    sop_file: "projects/sop_monitoring/config/laprap.yaml"
 
 inference:
   device: "cpu"
@@ -20,7 +23,7 @@ inference:
 
 models:
   yolo:
-    weights: "shared/models/yolo/TFF4040_roboflow2.onnx"
+    weights: "shared/models/yolo/laprap.onnx"
     input_size: 416
     fps_cap: 15
     conf_threshold: 0.25
@@ -34,6 +37,17 @@ cameras:
     rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
+    yolo_model: "shared/models/yolo/TFF4040_roboflow2.onnx"
+    resolution: [640, 480]
+    fps_cap: 15
+
+  - id: "machine_08"
+    name: "Máy 8"
+    illustration: "/static/illustration/may_8.png"
+    rtsp_url: "rtsp://admin:Htmp%402019@192.168.103.18:554/Streaming/Channels/101"
+    sop_file: "projects/sop_monitoring/config/laprap.yaml"
+    engine_id: "laprap"
+    yolo_model: "shared/models/yolo/laprap.onnx"
     resolution: [640, 480]
     fps_cap: 15
 

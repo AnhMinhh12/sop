@@ -1,0 +1,50 @@
+station_id: "08"
+station_name: "Máy 8 - Lắp ráp linh kiện"
+
+# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+zones:
+  hop_giua: [[0.39, 0.851], [0.567, 0.844], [0.546, 0.633], [0.362, 0.601]]
+  thung_tren: [[0.362, 0.946], [0.042, 0.799], [0.155, 0.461], [0.379, 0.55]]
+  thung_phai: [[0.558, 0.599], [0.551, 0.368], [0.311, 0.374], [0.302, 0.59]]
+
+# QUY TRÌNH SOP CHI TIẾT
+steps:
+  - step_order: 1
+    step_name: "Đặt SP1 vào hộp giữa"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "hop_giua"
+    require_product: false
+    min_dwell_sec: 0.2
+    timeout_sec: -1
+
+  - step_order: 2
+    step_name: "Lấy SP2 từ thùng trên"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "thung_tren"
+    require_product: false
+    min_dwell_sec: 0.2
+
+  - step_order: 3
+    step_name: "Lắp SP2 vào hộp giữa"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "hop_giua"
+    require_product: false
+    min_dwell_sec: 0.2
+
+  - step_order: 4
+    step_name: "Đưa thành phẩm vào thùng phải"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "thung_phai"
+    require_product: true
+    min_dwell_sec: 0.2
+
+config:
+  violation_tolerance: 5
+  idle_timeout_frames: 120
+  transition_timeout_sec: 25.0
+  min_step_dwell_sec: 0.2
+  restart_allowed_until_step: 0

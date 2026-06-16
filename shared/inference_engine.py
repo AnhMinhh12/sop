@@ -12,24 +12,42 @@ logger = logging.getLogger(__name__)
 
 class InferenceEngine:
     """
-    Singleton class to handle centralized CPU inference for all cameras.
-    Uses a threading lock to serialize ONNX inference calls (no queue race condition).
+    Multiton class to handle centralized CPU inference for all cameras.
+    Keeps one instance per model_path.
+    Uses a threading lock per instance to serialize ONNX inference calls.
     Optimized for Intel Xeon processors using ONNX Runtime.
     """
-    _instance = None
+    _instances = {}
     _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, model_path: Optional[str] = None, *args, **kwargs):
+        if model_path is None:
+            with cls._lock:
+                if cls._instances:
+                    first_key = list(cls._instances.keys())[0]
+                    return cls._instances[first_key]
+                return None
+
+        abs_path = os.path.abspath(model_path)
         with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(InferenceEngine, cls).__new__(cls)
-                cls._instance._initialized = False
-        return cls._instance
+            if abs_path not in cls._instances:
+                instance = super(InferenceEngine, cls).__new__(cls)
+                instance._initialized = False
+                cls._instances[abs_path] = instance
+            return cls._instances[abs_path]
 
     @classmethod
-    def get_instance(cls) -> Optional["InferenceEngine"]:
-        """Returns the singleton instance, or None if not yet initialized."""
-        return cls._instance
+    def get_instance(cls, model_path: Optional[str] = None) -> Optional["InferenceEngine"]:
+        """Returns the instance for model_path, or the default first instance if not specified."""
+        with cls._lock:
+            if model_path is None:
+                if cls._instances:
+                    first_key = list(cls._instances.keys())[0]
+                    return cls._instances[first_key]
+                return None
+            
+            abs_path = os.path.abspath(model_path)
+            return cls._instances.get(abs_path)
 
     def __init__(self, model_path: Optional[str] = None, num_threads: int = 4, input_size: int = 416):
         if self._initialized:
