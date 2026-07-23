@@ -16,6 +16,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global storage for processors
 processors: Dict[str, Any] = {}
+external_frames: Dict[str, bytes] = {}
 
 # Import all routes from the central routes.py
 from app import routes

@@ -53,6 +53,7 @@ class ConfigLoader:
     def load_yaml(path: str) -> Dict[str, Any]:
         """Loads a generic YAML file by path."""
         if not os.path.exists(path):
+            logger.error(f"ConfigLoader: YAML file not found at {os.path.abspath(path)}")
             return {}
         try:
             with open(path, 'r', encoding='utf-8') as f:

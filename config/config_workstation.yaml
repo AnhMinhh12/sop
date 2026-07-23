@@ -13,7 +13,7 @@ products:
     sop_file: "projects/sop_monitoring/config/626287.yaml"
   - id: "laprap"
     name: "laprap"
-    sop_file: "projects/sop_monitoring/config/laprap.yaml"
+    sop_file: "../laprap_htmp/laprap.yaml"
 
 inference:
   device: "cpu"
@@ -33,24 +33,24 @@ cameras:
   - id: "machine_07"
     name: "Máy 7"
     illustration: "/static/illustration/may_7.png"
-    #rtsp_url: "D:/Apps/SOP_HTMP/TFF4040_1.mp4"
     rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
     yolo_model: "shared/models/yolo/TFF4040_roboflow2.onnx"
     resolution: [640, 480]
     fps_cap: 15
+    is_external: true # Trạm con bỏ qua không chạy AI cho Máy 7
 
   - id: "machine_08"
     name: "Máy 8"
     illustration: "/static/illustration/may_8.png"
     rtsp_url: "rtsp://admin:Htmp%402019@192.168.103.18:554/Streaming/Channels/101"
-    sop_file: "projects/sop_monitoring/config/laprap.yaml"
+    sop_file: "../laprap_htmp/laprap.yaml"
     engine_id: "laprap"
-    yolo_model: "" # Không chạy AI cục bộ tại Hub
+    yolo_model: "../laprap_htmp/best_sp.onnx"
     resolution: [640, 480]
     fps_cap: 15
-    is_external: true # Nhận frame push trực tiếp từ máy trạm con qua HTTP API
+    is_external: false # Trạm con tự chạy AI cho Máy 8 cục bộ
 
 alerts:
   audio:
@@ -65,7 +65,7 @@ storage:
   clip_post_seconds: 5
   max_disk_usage_percent: 85
   min_free_gb: 50
-  retention_days: 30  # Lưu video trong vòng 30 ngày (1 tháng)
+  retention_days: 30
 
 logging:
   level: "INFO"

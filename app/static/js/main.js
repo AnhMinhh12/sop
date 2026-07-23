@@ -438,7 +438,7 @@ function renderOverviewGrid(cameras) {
             : `<div class="station-icon">📸</div>`;
         const card = document.createElement('a');
         card.className = 'overview-card';
-        card.href = `/station/${cam.id}`;
+        card.href = cam.redirect_url || `/station/${cam.id}`;
         card.id = `overview-${cam.id}`;
         card.innerHTML = `
             <div class="overview-header-icon">${illustrationHtml}<div class="status-badge" id="status-badge-${cam.id}">INIT</div></div>

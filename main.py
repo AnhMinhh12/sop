@@ -125,6 +125,13 @@ def start_sop_monitoring():
 
         logger.info(f"Main: Starting station {station_id} setup...")
 
+        # Nếu là camera chạy trên server/máy tính khác (External), bỏ qua không khởi chạy Processor AI ở đây
+        if cam_cfg.get("is_external", False):
+            # Đồng bộ camera ngoại vi vào DB cơ bản mà không cần định nghĩa SOP chi tiết trên Hub
+            CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], None)
+            logger.info(f"Main: Station {cam_id} is marked as external. Skipping SOP and AI processor setup.")
+            continue
+
         # Load SOP (Phiên bản ZONES mới)
         sop_file = cam_cfg.get("sop_file")
         if sop_file:

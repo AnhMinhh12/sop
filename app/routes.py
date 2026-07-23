@@ -49,6 +49,14 @@ def gen_frames(camera_id: str):
     cached_bytes = None
     
     while True:
+        # Nếu là camera ngoại vi tự push frame lên Hub
+        from app import external_frames
+        if camera_id in external_frames:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + external_frames[camera_id] + b'\r\n')
+            time.sleep(0.06) # Giới hạn khoảng 15 FPS
+            continue
+
         if camera_id in processors:
             proc = processors[camera_id]
             loop_count = proc._loop_count
@@ -74,6 +82,36 @@ def video_feed(camera_id):
     """Endpoint cho livestream."""
     return Response(gen_frames(camera_id),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/api/station/<camera_id>/push_frame', methods=['POST'])
+def push_frame(camera_id):
+    """API endpoint để các server trạm con đẩy frame đã vẽ và trạng thái FSM lên Hub."""
+    if 'image' not in request.files:
+        return jsonify({"success": False, "error": "No image file provided"}), 400
+        
+    file = request.files['image']
+    img_bytes = file.read()
+    
+    # Lưu vào cache frame ngoại vi trên Hub
+    from app import external_frames
+    external_frames[camera_id] = img_bytes
+    
+    # Nhận trạng thái FSM và phát qua WebSocket của Hub
+    status_json = request.form.get('status')
+    hands_json = request.form.get('hands')
+    
+    if status_json:
+        import json
+        try:
+            status_data = json.loads(status_json)
+            hands_data = json.loads(hands_json) if hands_json else []
+            from app import emit_step_update
+            emit_step_update(camera_id, status_data, hands_data)
+        except Exception as e:
+            logger.error(f"Error parsing external FSM status: {e}")
+            
+    return jsonify({"success": True})
 
 
 @app.route('/api/shared/templates/<path:template_name>')
