@@ -31,6 +31,7 @@ projects/sop_monitoring/training/dataset *.rar
 *.rar
 *.mp4
 *.avi
+*.wav
 *.mov
 *.jpg
 *.png
