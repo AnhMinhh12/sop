@@ -1,0 +1,58 @@
+station_id: "08"
+station_name: "Máy 8 - Lắp ráp linh kiện"
+
+# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+zones:
+  hop_giua: [[0.598, 0.824], [0.393, 0.856], [0.389, 0.535], [0.551, 0.522]]
+  thung_tren: [[0.389, 0.876], [0.083, 0.769], [0.173, 0.414], [0.395, 0.481]]
+  thung_phai: [[0.553, 0.517], [0.305, 0.526], [0.312, 0.285], [0.55, 0.285]]
+  thung_trai: [[0.364, 0.998], [0.392, 0.865], [0.603, 0.828], [0.631, 0.997]]
+
+# QUY TRÌNH SOP CHI TIẾT
+steps:
+  - step_order: 1
+    step_name: "Đặt SP1 vào hộp giữa"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "hop_giua"
+    require_product: true       # Yêu cầu cả TAY và SẢN PHẨM ở hộp giữa
+    min_dwell_sec: 0.3
+    timeout_sec: -1
+
+  - step_order: 2
+    step_name: "Lấy SP2 từ thùng trên"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "thung_tren"
+    require_product: false      # TẮT: Không yêu cầu sản phẩm ở thùng trên (chỉ cần tay)
+    min_dwell_sec: 0.4
+
+  - step_order: 3
+    step_name: "Lắp SP2 vào hộp giữa"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "hop_giua"
+    require_product: true       # BẬT: Yêu cầu cả TAY và SẢN PHẨM ở hộp giữa khi lắp ráp
+    min_dwell_sec: 0.4
+
+  - step_order: 4
+    step_name: "Đưa thành phẩm vào thùng phải"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "thung_phai"
+    require_product: true       # Yêu cầu cả TAY và THÀNH PHẨM ở thùng phải
+    min_dwell_sec: 0.3
+
+config:
+  violation_tolerance: 5
+  idle_timeout_frames: 120
+  transition_timeout_sec: 25.0
+  min_step_dwell_sec: 0.4
+  restart_allowed_until_step: 0
+  ignore_zones: []
+  # Tắt freeze 2 tay vì 1 tay giữ sản phẩm là bình thường
+  freeze_on_two_hands: false
+  freeze_cooldown_sec: 1.5
+  # Ngưỡng velocity (normalized) để phân biệt tay động vs tay tĩnh
+  # Tay dưới ngưỡng này bị coi là tay giữ → bỏ qua trong FSM
+  active_hand_velocity_threshold: 0.012

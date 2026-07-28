@@ -39,7 +39,7 @@ cameras:
     yolo_model: "shared/models/yolo/TFF4040_roboflow2.onnx"
     resolution: [640, 480]
     fps_cap: 15
-    is_external: true # Trạm con bỏ qua không chạy AI cho Máy 7
+    is_external: false # Trạm con bỏ qua không chạy AI cho Máy 7
 
   - id: "machine_08"
     name: "Máy 8"

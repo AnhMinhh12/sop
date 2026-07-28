@@ -3,7 +3,7 @@ import logging
 import signal
 import sys
 import cv2
-
+#hello
 if sys.stdout.encoding != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -83,9 +83,77 @@ def start_sop_monitoring():
         logger.error("Failed to load config.yaml. Exiting.")
         return
 
-    # 2. Khởi tạo Database (Đã tự động khởi tạo khi import db)
+    # Kiểm tra Hub mode
+    hub_config = config.get("hub", {})
+    hub_mode = os.getenv("HUB_MODE", hub_config.get("mode", "full"))
 
-    # 3. Khởi tạo AI Engine (Singleton)
+    if hub_mode == "aggregator":
+        logger.info("=== HUB MODE: AGGREGATOR (Edge AI - No local inference) ===")
+        _start_aggregator_mode(config)
+    else:
+        logger.info("=== HUB MODE: FULL (Local AI inference) ===")
+        _start_full_mode(config)
+
+
+def _start_aggregator_mode(config: dict):
+    """
+    Chế độ Aggregator: Hub chỉ nhận frame từ Edge, không chạy AI local.
+    Tiết kiệm CPU, scale bằng cách thêm Edge servers.
+    """
+    from shared.db.queries import CameraQueries, DefinitionQueries
+
+    logger.info("Aggregator: Initializing database connection only...")
+
+    # 1. Sync cameras từ config vào DB (không khởi tạo AI processors)
+    logger.info(f"Aggregator: Found {len(config['cameras'])} cameras in config.")
+    for cam_cfg in config["cameras"]:
+        cam_id = cam_cfg["id"]
+        station_id = cam_id
+
+        logger.info(f"Aggregator: Syncing station {station_id}...")
+
+        # Load SOP definition nếu có
+        sop_file = cam_cfg.get("sop_file")
+        if sop_file:
+            sop_def = ConfigLoader.load_yaml(sop_file)
+        else:
+            clean_sid = station_id.replace("station_", "").replace("machine_", "")
+            sop_def = ConfigLoader.load_sop_definition(clean_sid)
+
+        # Đồng bộ DB
+        def_name = sop_def.get("station_name", f"SOP {station_id}") if sop_def else f"SOP {station_id}"
+        def_id = None
+        if sop_def:
+            def_id = DefinitionQueries.upsert_definition(def_name, total_steps=len(sop_def.get("steps", [])))
+            if def_id:
+                DefinitionQueries.sync_steps(def_id, sop_def.get("steps", []))
+        CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], def_id)
+        logger.info(f"Aggregator: Station {cam_id} synced to DB (waiting for edge connection)")
+
+    # 2. Khởi chạy Flask Dashboard
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", 5001))
+
+    logger.info("====================================================")
+    logger.info(f"  AGGREGATOR DASHBOARD READY AT: http://{host}:{port}")
+    logger.info("  Waiting for Edge servers to push frames...")
+    logger.info("====================================================")
+
+    socketio.run(flask_app, host=host, port=port,
+                 debug=False, use_reloader=False,
+                 log_output=True, allow_unsafe_werkzeug=True)
+
+
+def _start_full_mode(config: dict):
+    """
+    Chế độ Full: Hub chạy AI local (model hiện tại).
+    Giữ nguyên logic cũ để tương thích ngược.
+    """
+    from shared.db.queries import CameraQueries, DefinitionQueries
+
+    logger.info("Full Mode: Starting local AI inference...")
+
+    # 1. Khởi tạo AI Engine (Singleton)
     yolo_cfg = config["models"]["yolo"]
     inference_cfg = config.get("inference", {})
     InferenceEngine(
@@ -94,7 +162,7 @@ def start_sop_monitoring():
         input_size=int(os.getenv("AI_INPUT_SIZE", yolo_cfg["input_size"]))
     )
 
-    # 4. Khởi tạo các dịch vụ toàn hệ thống
+    # 2. Khởi tạo các dịch vụ toàn hệ thống
     logger.info("Main: Initializing system services...")
     storage_cfg = config.get("storage", {})
     cleanup = StorageCleanup(
@@ -115,51 +183,47 @@ def start_sop_monitoring():
     except Exception as e:
         logger.error(f"Main: AudioAlert failed to init: {e}. System will continue without audio.")
 
-    # 5. Khởi tạo từng trạm Camera và đồng bộ Database
-    from shared.db.queries import CameraQueries, DefinitionQueries
-
+    # 3. Khởi tạo từng trạm Camera và đồng bộ Database
     logger.info(f"Main: Found {len(config['cameras'])} cameras in config.")
     for cam_cfg in config["cameras"]:
         cam_id = cam_cfg["id"]
-        station_id = cam_cfg["id"]
+        station_id = cam_id
 
         logger.info(f"Main: Starting station {station_id} setup...")
 
-        # Nếu là camera chạy trên server/máy tính khác (External), bỏ qua không khởi chạy Processor AI ở đây
+        # Nếu là camera chạy trên server/máy tính khác (External), bỏ qua
         if cam_cfg.get("is_external", False):
-            # Đồng bộ camera ngoại vi vào DB cơ bản mà không cần định nghĩa SOP chi tiết trên Hub
             CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], None)
-            logger.info(f"Main: Station {cam_id} is marked as external. Skipping SOP and AI processor setup.")
+            logger.info(f"Main: Station {cam_id} is external. Skipping AI processor.")
             continue
 
-        # Load SOP (Phiên bản ZONES mới)
+        # Load SOP
         sop_file = cam_cfg.get("sop_file")
         if sop_file:
             sop_def = ConfigLoader.load_yaml(sop_file)
         else:
             clean_sid = station_id.replace("station_", "").replace("machine_", "")
             sop_def = ConfigLoader.load_sop_definition(clean_sid)
-        
-        # --- ĐỒNG BỘ MYSQL: Lưu quy trình và camera vào DB để dashboard sử dụng ---
+
+        # Đồng bộ DB
         def_name = sop_def.get("station_name", f"SOP {station_id}")
         def_id = DefinitionQueries.upsert_definition(def_name, total_steps=len(sop_def.get("steps", [])))
         if def_id:
             DefinitionQueries.sync_steps(def_id, sop_def.get("steps", []))
             CameraQueries.upsert_camera(station_id, cam_cfg["name"], cam_cfg["rtsp_url"], def_id)
-        
-        # Load Engine Logic cho mã sản phẩm này
+
+        # Load Engine
         engine_id = cam_cfg.get("engine_id")
         if not engine_id:
-            logger.error(f"Main: No engine_id defined for {cam_id}. Skipping.")
+            logger.error(f"Main: No engine_id for {cam_id}. Skipping.")
             continue
-            
+
         logger.info(f"Main: Loading engine '{engine_id}' for {cam_id}...")
         engine = EngineLoader.create_engine(engine_id, sop_def)
-        
         violation_detector = ViolationDetector(cam_id)
 
-        # Tạo Processor trung tâm
-        logger.info(f"Main: Building Reformed FrameProcessor for {cam_id}...")
+        # Tạo Processor
+        logger.info(f"Main: Building FrameProcessor for {cam_id}...")
         processor = FrameProcessor(
             camera_config=cam_cfg,
             engine=engine,
@@ -169,15 +233,14 @@ def start_sop_monitoring():
         )
         processor.sop_config = sop_def
 
-        # Lưu vào registry và Khởi chạy
         processors[cam_id] = processor
         processor.start()
-        logger.info(f"Main: Station {cam_id} is now ACTIVE & SYNCED to MySQL.")
+        logger.info(f"Main: Station {cam_id} is now ACTIVE.")
 
-    # Chạy Web Dashboard ở chế độ đa luồng (threading)
+    # 4. Chạy Web Dashboard
     host = os.getenv("APP_HOST", "0.0.0.0")
     port = int(os.getenv("APP_PORT", 5001))
-    
+
     logger.info("====================================================")
     logger.info(f"  DASHBOARD IS READY AT: http://{host}:{port}")
     logger.info("====================================================")

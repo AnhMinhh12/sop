@@ -1,0 +1,15 @@
+# Edge Client Dependencies
+# Minimal dependencies for edge worker machines
+
+# Core
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# HTTP client
+requests>=2.31.0
+
+# YAML config
+pyyaml>=6.0
+
+# Optional: ONNX Runtime (if using ONNX models)
+# onnxruntime>=1.16.0

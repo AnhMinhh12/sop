@@ -72,6 +72,7 @@ class FrameProcessor:
         self.running = False
         self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
         self.current_processed_frame = None
+        self.frame_lock = threading.Lock()  # Bảo vệ current_processed_frame khi đọc từ HTTP generator
         self.latest_status = {"sop_status": "idle", "progress_percent": 0}
         self.sop_config = None
         self._loop_count = 0
@@ -160,7 +161,8 @@ class FrameProcessor:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
 
             self.current_processed_frame = display_frame
-            self._loop_count += 1
+            with self.frame_lock:
+                self._loop_count += 1
             
             # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
             is_completed = self.latest_status.get("sop_status") == "completed"

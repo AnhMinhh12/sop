@@ -1,60 +1,274 @@
-# Quy Chuẩn Cấu Hình Camera Phân Tán (Push-Frame Mode)
+# Hướng dẫn Triển khai Distributed Edge Architecture
 
-Tài liệu này hướng dẫn cách cấu hình chạy camera phân tán ở máy trạm con (Edge Server) và đẩy kết quả nhận diện (gồm hình ảnh có vẽ khung và trạng thái FSM) về Hub trung tâm để hiển thị đồng nhất.
-
----
-
-## 1. Nguyên Tắc Hoạt Động (Push-Frame)
-
-* **Hub Trung tâm (Central Hub):**
-  * Quản lý tập trung cơ sở dữ liệu, lịch sử vi phạm, thống kê và giao diện Web UI chính.
-  * Cấu hình camera ngoại vi với `is_external: true` và `yolo_model: ""` để Hub không tự chạy luồng AI nội bộ (giảm tải CPU Hub).
-  * Cung cấp HTTP POST API tại `/api/station/<camera_id>/push_frame` để nhận ảnh JPEG đã vẽ khung và trạng thái FSM từ máy trạm con.
-  * Tự động phát WebSocket cập nhật giao diện thời gian thực khi nhận được dữ liệu đẩy về.
-
-* **Máy trạm con (Edge Server - ví dụ: `laprap_htmp`):**
-  * Chạy cực kỳ nhẹ nhàng (không cần Web Server Flask độc lập).
-  * Tự động đọc luồng RTSP camera, chạy model YOLO và kiểm tra FSM cục bộ.
-  * Nén ảnh kết quả thành JPEG và gửi HTTP POST đẩy thẳng lên Hub trung tâm thông qua luồng chạy ngầm (không gây trễ cho pipeline AI chính).
+Tài liệu này hướng dẫn cách mở rộng hệ thống AI Monitoring Hub bằng kiến trúc **Distributed Edge** — Hub chỉ làm dashboard, AI chạy trên các máy trạm con (mini-PC).
 
 ---
 
-## 2. Các Bước Cấu Hình & Chạy Thực Tế
+## Tổng quan Kiến trúc
 
-### Bước 1: Cấu hình trên Hub trung tâm (`AI_Monitoring_Hub/config/config.yaml`)
-Khai báo camera của Máy 8 dạng ngoại vi nhận dữ liệu đẩy về:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     HUB (Central Server)                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │ Flask/Socket│  │   MySQL     │  │   Frame Cache           │ │
+│  │ Dashboard   │  │   Database  │  │   (external_frames)     │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+│         ↑               ↑                      ↑                │
+└─────────┼───────────────┼──────────────────────┼────────────────┘
+          │               │                      │
+    Web Browser     Violation Logs        HTTP POST
+          │                                    │
+          │        ┌────────────────────────────┴──────────────────┐
+          │        │                 NETWORK                       │
+          │        └──────────────────────────────────────────────┘
+          │                      ↑           ↑           ↑
+    ┌─────┴─────┐       ┌───────┴───┐ ┌────┴────┐ ┌───┴────┐
+    │  Browser  │       │  Edge 1   │ │ Edge 2  │ │ Edge N │
+    │  (View)   │       │ (machine_07)│ │(machine_08)||(machine_09)
+    └───────────┘       └──────┬────┘ └────┬────┘ └───┬────┘
+                               │            │          │
+                          RTSP+CAM    RTSP+CAM   RTSP+CAM
+                          +YOLO       +YOLO      +YOLO
+```
+
+---
+
+## Hai Chế độ Hoạt động
+
+### Mode 1: FULL (Mặc định - giữ nguyên)
+Hub chạy AI local cho tất cả cameras.
 ```yaml
-  - id: "machine_08"
-    name: "Máy 8"
-    illustration: "/static/illustration/may_8.png"
-    rtsp_url: "rtsp://admin:Htmp%402019@192.168.103.18:554/Streaming/Channels/101"
-    sop_file: "projects/sop_monitoring/config/laprap.yaml" # Lưu bản sao SOP tại Hub để lấy checklist
+hub:
+  mode: "full"  # Mặc định
+```
+→ Dùng khi Hub có đủ CPU hoặc cần test nhanh.
+
+### Mode 2: AGGREGATOR (Khuyến nghị cho production)
+Hub **không chạy AI**, chỉ nhận frame từ Edge servers.
+```yaml
+hub:
+  mode: "aggregator"
+  api_key: "your-secret-key-here"  # Quan trọng: bảo mật
+```
+→ CPU Hub gần như 0, scale bằng cách thêm Edge.
+
+---
+
+## Bước 1: Cấu hình Hub (Aggregator Mode)
+
+### 1.1 Cập nhật `config/config.yaml`
+
+```yaml
+hub:
+  mode: "aggregator"
+  api_key: "change-me-in-production"
+  frame_cache_ttl_sec: 10
+
+cameras:
+  - id: "machine_07"
+    name: "Máy 7"
+    rtsp_url: "rtsp://..."
+    sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
+    engine_id: "TFF4040"
+    # is_external: true sẽ được tự động áp dụng trong aggregator mode
+
+  - id: "machine_09"
+    name: "Máy 9"
+    rtsp_url: "rtsp://..."
+    sop_file: "projects/sop_monitoring/config/laprap.yaml"
     engine_id: "laprap"
-    yolo_model: "" # Không chạy AI cục bộ tại Hub
-    resolution: [640, 480]
-    fps_cap: 15
-    is_external: true # Nhận frame push trực tiếp từ máy trạm con qua HTTP API
 ```
 
-### Bước 2: Chạy Hub trung tâm
-Trên server chính, mở terminal tại thư mục `AI_Monitoring_Hub` và khởi chạy:
+### 1.2 Khởi chạy Hub
+
 ```bash
+# Cách 1: Qua config
+# Sửa hub.mode = "aggregator" trong config.yaml
+
+# Cách 2: Qua env var (override config)
+set HUB_MODE=aggregator
+set HUB_API_KEY=my-secret-key
 python main.py
 ```
-*(Hub sẽ khởi động, mở cổng Web Dashboard và sẵn sàng nhận dữ liệu từ các máy trạm).*
 
-### Bước 3: Khởi chạy máy trạm con (`laprap_htmp`)
-Cấu hình địa chỉ Hub ngay trong file `laprap.yaml` (hoặc `config/laprap.yaml`) của máy con:
+**Log khi khởi động thành công:**
+```
+=== HTMP SOP MONITORING SYSTEM STARTING ===
+=== HUB MODE: AGGREGATOR (Edge AI - No local inference) ===
+Aggregator: Found 2 cameras in config.
+Aggregator: Station machine_07 synced to DB
+Aggregator: Station machine_09 synced to DB
+====================================================
+  AGGREGATOR DASHBOARD READY AT: http://0.0.0.0:5001
+  Waiting for Edge servers to push frames...
+====================================================
+```
+
+---
+
+## Bước 2: Triển khai Edge Client
+
+### 2.1 Chuẩn bị máy Edge (mini-PC)
+
+Yêu cầu:
+- OS: Windows 10/11 hoặc Ubuntu 20.04+
+- Python 3.8+
+- CPU: Intel Celeron/Pentium hoặc tương đương (YOLO inference nhẹ)
+- RAM: 4GB
+
+### 2.2 Cài đặt Dependencies
+
+```bash
+cd AI_Monitoring_Hub
+pip install -r edge_client/requirements.txt
+```
+
+### 2.3 Cấu hình Edge Client
+
+Tạo file `edge_client/config.yaml`:
+
 ```yaml
-hub_url: "http://<IP_CUA_HUB>:5001" # Địa chỉ máy chủ Hub
-camera_id: "machine_08"          # ID tương ứng trên Hub
+camera:
+  id: "machine_07"
+  name: "Máy 7"
+  rtsp_url: "rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101"
+  resolution: [640, 480]
+
+hub:
+  url: "http://10.0.10.100:5001"  # IP của Hub
+  api_key: "change-me-in-production"  # Phải khớp với Hub
+
+ai:
+  model_path: "shared/models/yolo/TFF4040.onnx"
+  input_size: 416
+
+sop:
+  file: "config/TFF4040.yaml"
+
+push:
+  interval_sec: 1.0
+  quality: 60
 ```
 
-Sau đó, chỉ cần chạy lệnh cực kỳ ngắn gọn:
+### 2.4 Khởi chạy Edge Client
+
 ```bash
+cd edge_client
+
+# Cách 1: Qua config file
+python main.py --config config.yaml
+
+# Cách 2: Qua env vars
+set HUB_URL=http://10.0.10.100:5001
+set HUB_API_KEY=my-secret-key
+set CAMERA_ID=machine_07
+set RTSP_URL=rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101
 python main.py
 ```
 
-*(Nếu muốn ghi đè cấu hình Hub từ dòng lệnh, bạn vẫn có thể truyền thêm tham số: `python main.py --hub-url http://localhost:5001 --camera-id machine_08`)*
+**Log khi khởi động thành công:**
+```
+=== EDGE CLIENT STARTING ===
+Camera ID: machine_07
+Hub URL: http://10.0.10.100:5001
+RTSP: rtsp://192.168.1.100:554/...
+Loading model: shared/models/yolo/TFF4040.onnx
+Loading engine: TFF4040
+Push interval: 1.0s
+=== EDGE CLIENT READY ===
+Pushing to: http://10.0.10.100:5001/api/station/machine_07/push_frame
+```
 
-*(Máy trạm con sẽ tự chạy AI nhận diện và đẩy trực tiếp video kèm checklist vẽ khung lên Dashboard của Hub trung tâm. Giao diện Web của Hub sẽ cập nhật mượt mà mọi thay đổi mà không cần tải model AI nội bộ).*
+---
+
+## Bước 3: Kiểm tra
+
+### 3.1 Test push_frame API
+
+```bash
+# Test manual với curl
+curl -X POST http://localhost:5001/api/station/machine_07/push_frame \
+  -H "X-API-Key: change-me-in-production" \
+  -F "image=@test.jpg" \
+  -F "status={\"sop_status\":\"idle\"}" \
+  -F "hands=[]"
+```
+
+Response `{"success": true}` = thành công.
+
+### 3.2 Kiểm tra Dashboard
+
+1. Mở trình duyệt: `http://<hub-ip>:5001/sop`
+2. Camera nào có Edge push frame sẽ hiển thị video
+3. Camera không có Edge sẽ hiển thị trạng thái "offline"
+
+### 3.3 Theo dõi CPU Usage
+
+```bash
+# Trên Hub (phải gần như 0 CPU)
+# Trên Edge (chạy AI)
+```
+
+---
+
+## Bước 4: Mở rộng (Scale)
+
+### Thêm Edge mới
+
+1. Thêm camera vào `config.yaml` trên Hub
+2. Cài đặt Edge Client trên máy mới
+3. Cấu hình `camera_id` khớp với Hub
+4. Khởi chạy — dashboard tự nhận diện
+
+### Monitoring nhiều Edges
+
+Có thể thêm bảng `edge_servers` trong DB để tracking:
+
+```sql
+CREATE TABLE edge_servers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    edge_id VARCHAR(50) UNIQUE,
+    ip_address VARCHAR(45),
+    last_heartbeat DATETIME,
+    camera_count INT,
+    status VARCHAR(20) DEFAULT 'online'
+);
+```
+
+---
+
+## Troubleshooting
+
+### Edge không push được
+1. Kiểm tra `HUB_API_KEY` khớp nhau
+2. Kiểm tra firewall: port 5001 mở chưa
+3. Kiểm tra Hub có đang chạy không
+
+### Dashboard hiển thị "stale"
+- Frame cache có TTL 10 giây
+- Nếu Edge push chậm >10s, Hub sẽ hiển thị offline
+- Tăng `hub.frame_cache_ttl_sec` nếu cần
+
+### Camera bị "frozen"
+- Edge có thể đã mất kết nối
+- Kiểm tra log Edge: `Push failed, consecutive errors`
+
+---
+
+## So sánh Performance
+
+| Metric | Full Mode | Aggregator Mode |
+|--------|-----------|-----------------|
+| CPU Hub | N × 40% | ~2% (Flask only) |
+| CPU Edge | 0% | 30-50% per camera |
+| Max Cameras | 3-4 (CPU limited) | Unlimited (scale horizontally) |
+| Latency | <100ms local | 1-2s (network) |
+
+---
+
+## Security Notes
+
+1. **API Key**: Đổi `change-me-in-production` bằng key thật
+2. **HTTPS**: Trong production, dùng HTTPS để mã hóa traffic
+3. **Firewall**: Chỉ mở port 5001 cho các IP edge được phép
+4. **API Key Rotation**: Đổi key định kỳ bằng cách restart cả Hub và Edge

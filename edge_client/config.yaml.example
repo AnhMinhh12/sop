@@ -1,0 +1,27 @@
+# Edge Client Configuration Example
+# Copy this file to config.yaml and update values
+
+camera:
+  id: "machine_09"  # Unique camera ID, must match Hub config
+  name: "Máy 9"
+  rtsp_url: "rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101"
+  resolution: [640, 480]
+  fps_cap: 15
+
+hub:
+  url: "http://10.0.10.100:5001"  # Hub server URL
+  api_key: "change-me-in-production"  # Must match HUB_API_KEY on Hub
+
+ai:
+  model_path: "shared/models/yolo/laprap.onnx"  # Local model path
+  input_size: 416
+  fps_cap: 15
+
+# SOP configuration - same as Hub's sop_file
+sop:
+  file: "projects/sop_monitoring/config/laprap.yaml"
+
+# Push settings
+push:
+  interval_sec: 1.0  # Push frame every N seconds (1-2s is good for dashboard)
+  quality: 60  # JPEG quality (0-100)

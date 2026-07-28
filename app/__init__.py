@@ -1,22 +1,53 @@
 import os
 import logging
+import time
+import threading
 from flask import Flask
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from typing import Dict, Any
 
 # Initialize Flask & SocketIO
-app = Flask(__name__, 
-            template_folder='templates', 
+app = Flask(__name__,
+            template_folder='templates',
             static_folder='static')
 CORS(app, resources={r"/static/*": {"origins": "*"}, r"/api/*": {"origins": "*"}})
 app.config['SECRET_KEY'] = os.getenv("APP_SECRET_KEY", "sop_monitoring_secret_default")
 app.config['HUB_URL'] = os.getenv("HUB_URL", "")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# Global storage for processors
+# Global storage for processors (local AI mode)
 processors: Dict[str, Any] = {}
-external_frames: Dict[str, bytes] = {}
+
+# Global storage for external frames (aggregator mode)
+# Structure: {camera_id: {"frame": bytes, "timestamp": float}}
+external_frames: Dict[str, Dict[str, Any]] = {}
+_frame_cache_ttl = 10  # seconds before marking edge as offline
+
+
+def _init_frame_cache_cleanup():
+    """Background thread to clean up stale external frames."""
+    def cleanup_loop():
+        while True:
+            time.sleep(5)  # Check every 5 seconds
+            current_time = time.time()
+            stale_cameras = []
+
+            for cam_id, data in external_frames.items():
+                if current_time - data.get("timestamp", 0) > _frame_cache_ttl:
+                    stale_cameras.append(cam_id)
+
+            for cam_id in stale_cameras:
+                if cam_id in external_frames:
+                    del external_frames[cam_id]
+                    logging.warning(f"External frame cache expired for camera: {cam_id}")
+
+    t = threading.Thread(target=cleanup_loop, daemon=True)
+    t.start()
+
+
+# Start frame cache cleanup
+_init_frame_cache_cleanup()
 
 # Import all routes from the central routes.py
 from app import routes

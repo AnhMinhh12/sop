@@ -47,70 +47,135 @@ def gen_frames(camera_id: str):
     """Máy phát luồng MJPEG cho trình duyệt — Tối ưu CPU."""
     last_loop_count = -1
     cached_bytes = None
-    
+    last_emitted_at = 0.0
+
     while True:
-        # Nếu là camera ngoại vi tự push frame lên Hub
+        # Nếu là camera ngoại vi tự push frame lên Hub (Aggregator mode)
         from app import external_frames
         if camera_id in external_frames:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + external_frames[camera_id] + b'\r\n')
-            time.sleep(0.06) # Giới hạn khoảng 15 FPS
+            data = external_frames.get(camera_id, {})
+            frame_bytes = data.get("frame") if isinstance(data, dict) else data
+            if frame_bytes:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.06)  # Giới hạn khoảng 15 FPS
             continue
 
+        # Local AI mode - đọc từ FrameProcessor
+        # Khóa nhẹ để tránh race condition khi đọc _loop_count và frame từ thread xử lý
         if camera_id in processors:
             proc = processors[camera_id]
-            loop_count = proc._loop_count
-            if loop_count != last_loop_count:
-                frame = proc.get_latest_frame()
-                if frame is not None:
-                    try:
-                        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
-                        cached_bytes = buffer.tobytes()
+            try:
+                # Đọc loop_count + frame "trong cùng 1 nhịp" với lock nhẹ của processor
+                frame = None
+                with proc.frame_lock:
+                    loop_count = proc._loop_count
+                    if loop_count != last_loop_count:
+                        frame = proc.current_processed_frame  # đã là bản copy an toàn vì được set tham chiếu
                         last_loop_count = loop_count
-                    except Exception:
-                        pass
-                
+
+                if frame is not None:
+                    # JPEG quality 75 (mượt hơn 60 nhưng vẫn nhẹ) + nâng FPS gửi
+                    ok, buffer = cv2.imencode(
+                        '.jpg', frame,
+                        [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+                    )
+                    if ok:
+                        cached_bytes = buffer.tobytes()
+            except AttributeError:
+                # Fallback nếu processor chưa được thêm frame_lock (backward compat)
+                loop_count = proc._loop_count
+                if loop_count != last_loop_count:
+                    frame = proc.get_latest_frame()
+                    if frame is not None:
+                        try:
+                            ok, buffer = cv2.imencode(
+                                '.jpg', frame,
+                                [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+                            )
+                            if ok:
+                                cached_bytes = buffer.tobytes()
+                                last_loop_count = loop_count
+                        except Exception:
+                            pass
+
             if cached_bytes:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + cached_bytes + b'\r\n')
-        # Giảm xuống ~10 FPS — Mắt người không phân biệt 10 vs 15 FPS trên dashboard
-        time.sleep(0.1)
+                last_emitted_at = time.time()
+        else:
+            # Không có processor → in placeholder đen để báo cho client biết
+            # (Tránh trình duyệt treo khi không có dữ liệu)
+            pass
+
+        # ~15 FPS nhưng nhanh hơn trước đây để giảm delay cảm nhận được
+        time.sleep(0.06)
 
 
 @app.route('/video_feed/<camera_id>')
 def video_feed(camera_id):
     """Endpoint cho livestream."""
-    return Response(gen_frames(camera_id),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        gen_frames(camera_id),
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+        headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'X-Accel-Buffering': 'no',  # tắt buffering nếu chạy sau nginx
+            'Connection': 'keep-alive',
+        }
+    )
 
 
 @app.route('/api/station/<camera_id>/push_frame', methods=['POST'])
 def push_frame(camera_id):
-    """API endpoint để các server trạm con đẩy frame đã vẽ và trạng thái FSM lên Hub."""
+    """
+    API endpoint để các Edge server đẩy frame đã vẽ và trạng thái FSM lên Hub.
+    Yêu cầu X-API-Key header để xác thực.
+    """
+    import time
+    from app import external_frames
+
+    # 1. Validate API Key
+    api_key = request.headers.get('X-API-Key')
+    expected_key = os.getenv("HUB_API_KEY", "change-me-in-production")
+    if api_key != expected_key:
+        logger.warning(f"Unauthorized push_frame attempt from camera {camera_id}")
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+    # 2. Validate camera_id exists in config
+    config = ConfigLoader.load_config()
+    cameras = {c["id"] for c in config.get("cameras", [])}
+    if camera_id not in cameras:
+        logger.warning(f"Push frame from unregistered camera: {camera_id}")
+        return jsonify({"success": False, "error": "Camera not registered"}), 403
+
+    # 3. Validate image data
     if 'image' not in request.files:
         return jsonify({"success": False, "error": "No image file provided"}), 400
-        
+
     file = request.files['image']
     img_bytes = file.read()
-    
-    # Lưu vào cache frame ngoại vi trên Hub
-    from app import external_frames
-    external_frames[camera_id] = img_bytes
-    
-    # Nhận trạng thái FSM và phát qua WebSocket của Hub
+
+    # 4. Lưu vào cache với timestamp
+    external_frames[camera_id] = {
+        "frame": img_bytes,
+        "timestamp": time.time()
+    }
+
+    # 5. Nhận trạng thái FSM và phát qua WebSocket
     status_json = request.form.get('status')
     hands_json = request.form.get('hands')
-    
+
     if status_json:
-        import json
         try:
             status_data = json.loads(status_json)
             hands_data = json.loads(hands_json) if hands_json else []
-            from app import emit_step_update
             emit_step_update(camera_id, status_data, hands_data)
         except Exception as e:
             logger.error(f"Error parsing external FSM status: {e}")
-            
+
     return jsonify({"success": True})
 
 

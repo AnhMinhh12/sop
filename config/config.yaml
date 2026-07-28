@@ -4,6 +4,11 @@ server:
   debug: false
   secret_key: "default-secret-key-change-me"
 
+hub:
+  mode: "full"  # "full" = AI local, "aggregator" = edge-only (no AI on Hub)
+  api_key: "change-me-in-production"  # Edge authentication token
+  frame_cache_ttl_sec: 10  # Max seconds before marking edge as offline
+
 products:
   - id: "TFF4040"
     name: "TFF4040"
