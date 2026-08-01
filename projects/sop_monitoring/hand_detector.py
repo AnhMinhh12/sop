@@ -59,7 +59,8 @@ class HandDetector:
         output = output.T # (8400, 4 + num_classes) -> [cx, cy, w, h, class0_conf, class1_conf, ...]
         
         num_classes = output.shape[1] - 4
-        class_mapping = {0: "hand", 1: "product"}
+        # Class mapping: 0=hand, 1=product, 2=robot (arm công nghiệp)
+        class_mapping = {0: "hand", 1: "product", 2: "robot"}
         
         all_boxes = []
         all_confs = []

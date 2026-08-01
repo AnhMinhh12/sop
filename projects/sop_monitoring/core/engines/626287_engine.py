@@ -71,7 +71,8 @@ class ProductEngine(BaseEngine):
         logger.info(f"ProductEngine [626287]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
-    def update(self, hands_data: List[Dict], products_data: List[Dict] = None) -> Dict[str, Any]:
+    def update(self, hands_data: List[Dict], products_data: List[Dict] = None,
+               robot_data: List[Dict] = None) -> Dict[str, Any]:
         now = time.time()
         self.last_hands = hands_data
         self.last_products = products_data if products_data is not None else []

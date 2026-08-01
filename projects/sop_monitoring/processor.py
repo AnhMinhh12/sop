@@ -79,6 +79,7 @@ class FrameProcessor:
         self.last_step_idx = -1
         self._cached_hands = []
         self._cached_products = []
+        self._cached_robots = []  # Robot arm detections (class=robot)
         self._last_hands_update_time = 0.0
         self.thread = None
 
@@ -113,9 +114,10 @@ class FrameProcessor:
             if self._loop_count % 2 == 0:
                 detections = self.hand_detector.detect(frame)
                 
-                # Phân tách detections thành tay và sản phẩm (mặc định nếu thiếu key class là hand)
+                # Phân tách detections thành tay, sản phẩm, và robot
                 hand_dets = [d for d in detections if d.get("class", "hand") == "hand"]
                 self._cached_products = [d for d in detections if d.get("class") == "product"]
+                self._cached_robots = [d for d in detections if d.get("class") == "robot"]
                 
                 # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
                 filtered_dets = self._filter_detections_by_roi(hand_dets)
@@ -131,10 +133,11 @@ class FrameProcessor:
             if loop_start - self._last_hands_update_time > 0.3:
                 self._cached_hands = []
                 self._cached_products = []
+                self._cached_robots = []
                 hands_data = []
 
-            # 3. Dynamic Engine Update
-            self.latest_status = self.engine.update(hands_data, self._cached_products)
+            # 3. Dynamic Engine Update (truyền thêm robot_data cho TFF4040)
+            self.latest_status = self.engine.update(hands_data, self._cached_products, self._cached_robots)
             
             # 4. Check Violation
             violation = self.violation_detector.analyze(self.latest_status)
@@ -157,8 +160,15 @@ class FrameProcessor:
             for p in self._cached_products:
                 bbox = p["bbox"]
                 cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), prod_color, 2)
-                cv2.putText(display_frame, "Product", (int(bbox[0]), int(bbox[1] - 5)), 
+                cv2.putText(display_frame, "Product", (int(bbox[0]), int(bbox[1] - 5)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
+
+            # Vẽ robot arm (nếu được phát hiện) bằng màu hồng
+            for r in self._cached_robots:
+                bbox = r["bbox"]
+                cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 100, 180), 2)
+                cv2.putText(display_frame, "Robot", (int(bbox[0]), int(bbox[1] - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 180), 1, cv2.LINE_AA)
 
             self.current_processed_frame = display_frame
             with self.frame_lock:

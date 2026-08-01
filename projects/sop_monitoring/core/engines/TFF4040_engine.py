@@ -37,6 +37,7 @@ class ProductEngine(BaseEngine):
         self._completed_at = 0
         self.last_hands = []
         self.last_products = []
+        self.last_robots = []
         self.hand_dist = -1.0
         
         self.is_failed = False
@@ -75,10 +76,12 @@ class ProductEngine(BaseEngine):
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
-    def update(self, hands_data: List[Dict], products_data: List[Dict] = None) -> Dict[str, Any]:
+    def update(self, hands_data: List[Dict], products_data: List[Dict] = None,
+               robot_data: List[Dict] = None) -> Dict[str, Any]:
         now = time.time()
         self.last_hands = hands_data
         self.last_products = products_data if products_data is not None else []
+        self.last_robots = robot_data if robot_data is not None else []
         
         # Cập nhật trạng thái rút tay của bước 1 cho frame sau, lưu trạng thái trước đó lại
         was_s1_withdrawn = self.s1_withdrawn
@@ -203,25 +206,10 @@ class ProductEngine(BaseEngine):
             current_zones = self._get_all_zones_for_step(current_step)
             is_in_current_area = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in current_zones)
             
-            # Nới lỏng Bước 7: Nếu phát hiện tay ở vùng Bước 8 (left_table hoặc middle_table) và giữ vững >= 0.2s, tự động hoàn thành Bước 7
-            if self.current_step_idx == 6:
-                step_8_zones = ["left_table", "middle_table"]
-                is_in_s8_sustained = False
-                for side in ["left", "right"]:
-                    for z in step_8_zones:
-                        if self._is_in_zone(side, z):
-                            entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
-                            if entry > self.step_start_time and (now - entry >= 0.2):
-                                is_in_s8_sustained = True
-                                break
-                    if is_in_s8_sustained:
-                        break
-                if is_in_s8_sustained:
-                    self.log_debug("Tự động hoàn thành Bước 7 vì phát hiện tay đã ở vùng Bước 8.", self.product_id)
-                    self._complete_current_step(now)
-                    current_step = self.sop_steps[self.current_step_idx]
-                    current_zones = self._get_all_zones_for_step(current_step)
-                    is_in_current_area = any(self._is_in_zone(side, z) for side in ["left", "right"] for z in current_zones)
+            # Nới lỏng Bước 5: Nếu phát hiện tay ở vùng Bước 2 (mold) và giữ vững >= 0.2s, tự động hoàn thành Bước 5
+            # (Fallback: cho phép tay quay lại mold sau khi bấm nút — bước này không còn cần shortcut nữa vì
+            # step 5 chỉ cần tay phải bấm button_right đúng 1 lần)
+            # Đã xóa shortcut vì quy trình mới không có bước phụ sau nút
             
             if self.waiting_for_start:
                 if is_in_current_area:
@@ -529,6 +517,34 @@ class ProductEngine(BaseEngine):
 
     def _check_step_logic(self, step: Dict, now: float, update_status: bool = True, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:
         logic = step.get("logic")
+
+        # --- LOGIC MỚI: Robot lấy SP hoàn thành khi robot in mold + mold trống ---
+        if logic == "robot_and_zone_absent":
+            target = step.get("required_zone")
+            require_robot = step.get("require_robot", False)
+            require_absent = step.get("require_product_absent", False)
+            min_dwell = step.get("min_dwell_sec", 0.3)
+
+            robot_in_zone = self._is_object_in_zone(self.last_robots, target)
+            product_gone = not self._is_product_in_zone(target)
+
+            # Dwell timer cho robot trong zone
+            if target not in self._zone_last_seen:
+                self._zone_last_seen[target] = {"left": 0.0, "right": 0.0}
+            if robot_in_zone:
+                if self._zone_last_seen[target]["left"] == 0.0:
+                    self._zone_last_seen[target]["left"] = now
+                dwell_ok = (now - self._zone_last_seen[target]["left"]) >= min_dwell
+            else:
+                self._zone_last_seen[target]["left"] = 0.0
+                dwell_ok = False
+
+            if require_robot and not robot_in_zone:
+                return False
+            if require_absent and not product_gone:
+                return False
+            return dwell_ok
+
         if logic == "zone_trigger":
             target = step.get("required_zone")
             mode = step.get("active_hand", "any")
@@ -550,11 +566,19 @@ class ProductEngine(BaseEngine):
                             
             if not update_status:
                 if mode == "both":
-                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
+                           self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                elif mode == "nearest_2":
+                    nearest = self._select_nearest_hands(self.last_hands, "work_area", n=2)
+                    return any(self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                               for side in nearest)
                 return any(self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor) for side in ["left", "right"])
-                
+
             if mode == "both":
                 return self._zone_triggered[target]["left"] and self._zone_triggered[target]["right"]
+            elif mode == "nearest_2":
+                nearest = self._select_nearest_hands(self.last_hands, "work_area", n=2)
+                return any(self._zone_triggered[target].get(s, False) for s in nearest)
             elif mode == "any":
                 return self._zone_triggered[target]["left"] or self._zone_triggered[target]["right"]
             else:
@@ -565,30 +589,56 @@ class ProductEngine(BaseEngine):
             min_dur = step.get("min_duration_sec", 0.5)
             mode = step.get("active_hand", "both")
             if target not in self._stay_timer: self._stay_timer[target] = {"left": 0, "right": 0}
-            for side in ["left", "right"]:
-                is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
-                if is_in and step.get("require_product", False):
-                    if not self._is_product_in_zone(target):
-                        is_in = False
-                if is_in:
-                    if self._stay_timer[target][side] == 0 and update_status: self._stay_timer[target][side] = now  
-                elif update_status: self._stay_timer[target][side] = 0 
-            if mode == "any": return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
-            elif mode == "both": return all(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
-            return self._stay_timer[target][mode] > 0 and (now - self._stay_timer[target][mode]) >= min_dur
-            
+
+            # nearest_2: chỉ lấy 2 tay gần work_area nhất
+            if mode == "nearest_2":
+                nearest = self._select_nearest_hands(self.last_hands, "work_area", n=2)
+                for side in nearest:
+                    is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    if is_in and step.get("require_product", False):
+                        if not self._is_product_in_zone(target):
+                            is_in = False
+                    if is_in:
+                        if self._stay_timer[target][side] == 0 and update_status:
+                            self._stay_timer[target][side] = now
+                    elif update_status:
+                        self._stay_timer[target][side] = 0
+                return all(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in nearest)
+            else:
+                for side in ["left", "right"]:
+                    is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    if is_in and step.get("require_product", False):
+                        if not self._is_product_in_zone(target):
+                            is_in = False
+                    if is_in:
+                        if self._stay_timer[target][side] == 0 and update_status: self._stay_timer[target][side] = now
+                    elif update_status: self._stay_timer[target][side] = 0
+                if mode == "any": return any(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
+                elif mode == "both": return all(self._stay_timer[target][s] > 0 and (now - self._stay_timer[target][s]) >= min_dur for s in ["left", "right"])
+                return self._stay_timer[target][mode] > 0 and (now - self._stay_timer[target][mode]) >= min_dur
+
         elif logic == "multi_trigger":
             target = step.get("required_zone")
             count_needed = step.get("required_count", 1)
             mode = step.get("active_hand", "any")
             any_in = False
-            
+
+            # nearest_2: chỉ lấy 2 tay gần work_area nhất
+            if mode == "nearest_2":
+                nearest = self._select_nearest_hands(self.last_hands, "work_area", n=2)
+            else:
+                nearest = {"left", "right"}
+
             if target not in self._zone_last_seen:
                 self._zone_last_seen[target] = {"left": 0.0, "right": 0.0}
             if target not in self._hit_registered:
                 self._hit_registered[target] = {"left": False, "right": False}
-                
+
             for side in ["left", "right"]:
+                # nearest_2: bỏ qua tay không trong nearest set
+                if mode == "nearest_2" and side not in nearest:
+                    continue
+
                 is_in = self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor)
                 if is_in and step.get("require_product", False):
                     if not self._is_product_in_zone(target):
@@ -598,11 +648,11 @@ class ProductEngine(BaseEngine):
                     last_seen = self._zone_last_seen[target].get(side, 0.0)
                     if last_seen > 0 and (now - last_seen < 0.3):
                         is_in_debounced = True
-                        
+
                 if update_status:
                     if is_in:
                         self._zone_last_seen[target][side] = now
-                        
+
                 if side not in self.last_trigger_states:
                     was_already_in = (
                         self.current_step_idx > 0 and
@@ -610,7 +660,7 @@ class ProductEngine(BaseEngine):
                         self.hand_states[side]["entry_time"] < self.step_start_time
                     )
                     self.last_trigger_states[side] = was_already_in
-                    
+
                 if update_status:
                     if is_in_debounced:
                         entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == target else now
@@ -625,14 +675,18 @@ class ProductEngine(BaseEngine):
                         if target in self._hit_registered:
                             self._hit_registered[target][side] = False
                     self.last_trigger_states[side] = is_in_debounced
-                    
+
             if not update_status:
                 if mode == "both":
-                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and                            self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                    return self._is_in_zone("left", target, centroid_only=centroid_only, shrink_factor=shrink_factor) and \
+                           self._is_in_zone("right", target, centroid_only=centroid_only, shrink_factor=shrink_factor)
+                elif mode == "nearest_2":
+                    return any(self._is_in_zone(side, target, centroid_only=centroid_only, shrink_factor=shrink_factor) for side in nearest)
                 return any_in
-                
-            # Cho phép hoàn thành bằng 1 trigger + rút tay cho các bước lấy 2 SP/Slider từ khuôn (bước 1 và 3)
-            if self.current_step_idx in [0, 2]:
+
+            # Cho phép hoàn thành bước 1 (robot lấy SP) bằng 1 trigger + withdrawal
+            # Bước 2, 4 (multi_trigger với nearest_2) không cần shortcut này
+            if self.current_step_idx == 0:
                 if self.hit_count >= count_needed:
                     return True
                 s1_any_in = False
@@ -642,7 +696,7 @@ class ProductEngine(BaseEngine):
                 if self.hit_count >= 1 and not s1_any_in:
                     return True
                 return False
-                
+
             return self.hit_count >= count_needed
             
         elif logic == "dual_task":
