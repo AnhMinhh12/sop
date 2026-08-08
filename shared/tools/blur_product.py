@@ -258,7 +258,7 @@ def main():
                     
         print(f"⏳ Dang khoi tao YOLO ONNX Engine tu: {abs_weights}...")
         InferenceEngine(model_path=abs_weights, num_threads=4, input_size=input_size)
-        detector = HandDetector(camera_id="blur_tool", confidence_threshold=0.15)
+        detector = HandDetector(camera_id="blur_tool", confidence_threshold=0.15, model_path=abs_weights)
         
         # Nhap do mo rong vung lam mo quanh tay
         print("\nNhap do mo rong vung lam mo quanh tay (%, mac dinh: 40):")
@@ -400,7 +400,7 @@ def main():
                         x1, y1, x2, y2 = bbox
                         
                         # Nếu là sản phẩm detected trực tiếp, che chính xác bbox sản phẩm
-                        if h.get("class") == "product":
+                        if h.get("class") == "sp":
                             cv2.rectangle(mask, (int(x1), int(y1)), (int(x2), int(y2)), 255, -1)
                         else:
                             # Nếu là tay, mở rộng hộp để che phủ sản phẩm đang cầm

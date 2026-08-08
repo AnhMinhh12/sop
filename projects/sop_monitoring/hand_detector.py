@@ -13,16 +13,33 @@ class HandDetector:
     Wrapper for YOLOv11 hand detection model.
     Uses InferenceEngine for shared, synchronized CPU inference.
     """
-    def __init__(self, camera_id: str, confidence_threshold: float = 0.2,
-                 iou_threshold: float = 0.3, model_path: Optional[str] = None):
+    def __init__(self, camera_id: str, confidence_threshold: Optional[float] = None,
+                 iou_threshold: Optional[float] = None, model_path: Optional[str] = None):
         self.camera_id = camera_id
-        self.conf_threshold = confidence_threshold
-        self.iou_threshold = iou_threshold
         
         from shared.services.config_loader import ConfigLoader
         config = ConfigLoader.load_config()
         yolo_cfg = config.get("models", {}).get("yolo", {})
         inference_cfg = config.get("inference", {})
+        
+        # Check camera specific config
+        cameras = config.get("cameras", [])
+        cam_cfg = {}
+        for c in cameras:
+            if c.get("id") == camera_id:
+                cam_cfg = c
+                break
+                
+        # Resolve confidence threshold
+        if confidence_threshold is None or confidence_threshold == 0.15:
+            confidence_threshold = cam_cfg.get("conf_threshold") or yolo_cfg.get("conf_threshold") or 0.25
+            
+        # Resolve IOU threshold
+        if iou_threshold is None or iou_threshold == 0.3:
+            iou_threshold = cam_cfg.get("iou_threshold") or yolo_cfg.get("iou_threshold") or 0.45
+            
+        self.conf_threshold = confidence_threshold
+        self.iou_threshold = iou_threshold
         
         if model_path is None:
             model_path = yolo_cfg.get("weights")
@@ -59,8 +76,11 @@ class HandDetector:
         output = output.T # (8400, 4 + num_classes) -> [cx, cy, w, h, class0_conf, class1_conf, ...]
         
         num_classes = output.shape[1] - 4
-        # Class mapping: 0=hand, 1=product, 2=robot (arm công nghiệp)
-        class_mapping = {0: "hand", 1: "product", 2: "robot"}
+        # Class mapping: 0=hand, 1=robot (arm công nghiệp), 2=sp (sản phẩm)
+        if num_classes == 2:
+            class_mapping = {0: "hand", 1: "sp"}
+        else:
+            class_mapping = {0: "hand", 1: "robot", 2: "sp"}
         
         all_boxes = []
         all_confs = []

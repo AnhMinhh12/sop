@@ -50,7 +50,17 @@ class FrameProcessor:
         self.stream = RTSPStream(self.cam_id, self.rtsp_url, self.fps,
                                  target_width=self._target_w, target_height=self._target_h)
         model_path = camera_config.get("yolo_model")
-        self.hand_detector = HandDetector(self.cam_id, confidence_threshold=0.15, model_path=model_path)
+        from shared.services.config_loader import ConfigLoader
+        config = ConfigLoader.load_config()
+        yolo_cfg = config.get("models", {}).get("yolo", {})
+        conf_thres = camera_config.get("conf_threshold") or yolo_cfg.get("conf_threshold") or 0.25
+        iou_thres = camera_config.get("iou_threshold") or yolo_cfg.get("iou_threshold") or 0.45
+        self.hand_detector = HandDetector(
+            self.cam_id, 
+            confidence_threshold=conf_thres, 
+            iou_threshold=iou_thres, 
+            model_path=model_path
+        )
         # BỎ MediaPipe KeypointExtractor
 
         # Dynamic Engine
@@ -115,8 +125,13 @@ class FrameProcessor:
                 detections = self.hand_detector.detect(frame)
                 
                 # Phân tách detections thành tay, sản phẩm, và robot
-                hand_dets = [d for d in detections if d.get("class", "hand") == "hand"]
-                self._cached_products = [d for d in detections if d.get("class") == "product"]
+                hand_dets = [
+                    d for d in detections 
+                    if d.get("class", "hand") == "hand"
+                    and (d["bbox"][2] - d["bbox"][0]) <= frame.shape[1] * 0.35
+                    and (d["bbox"][3] - d["bbox"][1]) <= frame.shape[0] * 0.35
+                ]
+                self._cached_products = [d for d in detections if d.get("class") == "sp"]
                 self._cached_robots = [d for d in detections if d.get("class") == "robot"]
                 
                 # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
@@ -128,9 +143,9 @@ class FrameProcessor:
                 self._last_hands_update_time = loop_start
 
             # --- TAY MA (GHOST HANDS) PROTECTION ---
-            # Nếu AI không chạy hoặc detector liên tục không thấy tay trong 0.3s, xóa cache.
+            # Nếu AI không chạy hoặc detector liên tục không thấy tay trong 0.8s, xóa cache.
             # Điều này ngăn việc engine nhận diện nhầm khi công nhân đã rút tay ra nhưng AI chưa update.
-            if loop_start - self._last_hands_update_time > 0.3:
+            if loop_start - self._last_hands_update_time > 0.8:
                 self._cached_hands = []
                 self._cached_products = []
                 self._cached_robots = []

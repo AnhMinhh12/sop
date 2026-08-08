@@ -28,7 +28,7 @@ class HandDetector:
                 {
                     "bbox": [x1, y1, x2, y2],
                     "confidence": float,
-                    "class": str ("hand" or "product"),
+                    "class": str ("hand" or "sp"),
                     "centroid": [cx, cy],
                     "fingertip": [fx, fy],      # Precise fingertip coordinates (hands only)
                     "fingertip_detected": bool   # Whether white cot was found (hands only)
@@ -160,10 +160,14 @@ class HandDetector:
             for i in indices.flatten():
                 c_id = c_ids[i]
                 
-                # Nếu model có nhiều class, map class_id khác hand_class_id thành product
+                # Nếu model có nhiều class, map class_id khác hand_class_id thành product hoặc robot
                 c_name = "hand"
-                if num_classes > 1 and c_id != self.hand_class_id:
-                    c_name = "product"
+                if num_classes == 2:
+                    if c_id == 1:
+                        c_name = "sp"
+                elif num_classes > 2:
+                    class_mapping = {0: "hand", 1: "robot", 2: "sp"}
+                    c_name = class_mapping.get(c_id, "unknown")
                 
                 box = boxes[i]
                 bbox = [box[0], box[1], box[0] + box[2], box[1] + box[3]]

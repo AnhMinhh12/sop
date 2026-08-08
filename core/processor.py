@@ -40,8 +40,13 @@ class FrameProcessor:
         all_detections = self.detector.detect(frame)
 
         # Phân loại tay và sản phẩm riêng biệt
-        hands = [d for d in all_detections if d.get("class") == "hand"]
-        products = [d for d in all_detections if d.get("class") == "product"]
+        hands = [
+            d for d in all_detections 
+            if d.get("class") == "hand"
+            and (d["bbox"][2] - d["bbox"][0]) <= frame.shape[1] * 0.35
+            and (d["bbox"][3] - d["bbox"][1]) <= frame.shape[0] * 0.35
+        ]
+        products = [d for d in all_detections if d.get("class") == "sp"]
 
         # 2. Bám vết và định danh tay Trái/Phải
         hands_data = self._associate_hands(hands)
@@ -304,7 +309,7 @@ class FrameProcessor:
                 cv2.circle(frame, (fx, fy), 4, (100, 100, 100), -1)
 
         # 3. Draw products with orange/cyan border
-        products_to_draw = [d for d in all_detections if d.get("class") == "product"]
+        products_to_draw = [d for d in all_detections if d.get("class") == "sp"]
         for prod in products_to_draw:
             bbox = prod["bbox"]
             color = (255, 180, 0)
@@ -313,6 +318,19 @@ class FrameProcessor:
                           (int(bbox[2]), int(bbox[3])),
                           color, 2)
             cv2.putText(frame, "SP",
+                        (int(bbox[0]), int(bbox[1]) - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+
+        # Draw robot arm if detected
+        robots_to_draw = [d for d in all_detections if d.get("class") == "robot"]
+        for rob in robots_to_draw:
+            bbox = rob["bbox"]
+            color = (255, 100, 180)
+            cv2.rectangle(frame,
+                          (int(bbox[0]), int(bbox[1])),
+                          (int(bbox[2]), int(bbox[3])),
+                          color, 2)
+            cv2.putText(frame, "Robot",
                         (int(bbox[0]), int(bbox[1]) - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
 

@@ -104,12 +104,12 @@ class LaprapEngine:
                     is_point_in_zone(h["centroid"], self.zones.get(target_zone, []))
                 )
             ]
-            prods_in_zone = [p for p in hands_data if p.get("class") == "product" and is_point_in_zone(p["centroid"], self.zones.get(target_zone, []))]
+            prods_in_zone = [p for p in hands_data if p.get("class") == "sp" and is_point_in_zone(p["centroid"], self.zones.get(target_zone, []))]
 
             if current_step.get("step_order") == 4 or target_zone == "thung_phai":
                 # Step 4 is completed when there is no longer a product in hop_giua
                 hop_giua_zone = self.zones.get("hop_giua", [])
-                prods_in_hop_giua = [p for p in hands_data if p.get("class") == "product" and is_point_in_zone(p["centroid"], hop_giua_zone)]
+                prods_in_hop_giua = [p for p in hands_data if p.get("class") == "sp" and is_point_in_zone(p["centroid"], hop_giua_zone)]
                 is_in_target = (len(prods_in_hop_giua) == 0)
             else:
                 if require_prod:
@@ -145,7 +145,7 @@ class LaprapEngine:
                     # Hand has already gone to left. Now wait for product to reappear in hop_giua
                     hop_giua_zone = self.zones.get("hop_giua", [])
                     prod_in_hop_giua = any(
-                        p.get("class") == "product" and is_point_in_zone(p["centroid"], hop_giua_zone)
+                        p.get("class") == "sp" and is_point_in_zone(p["centroid"], hop_giua_zone)
                         for p in hands_data
                     )
 

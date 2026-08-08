@@ -31,20 +31,22 @@ models:
     weights: "shared/models/yolo/laprap.onnx"
     input_size: 416
     fps_cap: 15
-    conf_threshold: 0.25
+    conf_threshold: 0.35
     iou_threshold: 0.4516
 
 cameras:
   - id: "machine_07"
     name: "Máy 7"
     illustration: "/static/illustration/may_7.png"
-    #rtsp_url: "D:/Apps/SOP_HTMP/TFF4040_1.mp4"
     rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
+    #rtsp_url: "data/recordings/08_08_20260808_113003_3min.mp4"
+    #rtsp_url: "shared/tools/data/raw/07_08.mp4"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
-    yolo_model: "shared/models/yolo/TFF4040_roboflow2.onnx"
+    yolo_model: "shared/models/yolo/TFF4040_final.onnx"
     resolution: [640, 480]
     fps_cap: 15
+    conf_threshold: 0.35
 
   - id: "machine_08"
     name: "Máy 8"

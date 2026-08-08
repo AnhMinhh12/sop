@@ -63,7 +63,7 @@ def load_edge_config() -> dict:
     return config
 
 
-def draw_annotations(frame, hands, products, engine, camera_id, status):
+def draw_annotations(frame, hands, products, robots, engine, camera_id, status):
     """Vẽ annotations lên frame."""
     h, w = frame.shape[:2]
 
@@ -80,10 +80,21 @@ def draw_annotations(frame, hands, products, engine, camera_id, status):
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
     # Draw product boxes
+    prod_color = (0, 128, 255) if getattr(engine, "product_id", None) == "laprap" else (255, 0, 0)
     for prod in products:
         bbox = prod["bbox"]
         x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), prod_color, 2)
+        cv2.putText(frame, "Product", (x1, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
+
+    # Draw robot boxes
+    for robot in robots:
+        bbox = robot["bbox"]
+        x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 100, 180), 2)
+        cv2.putText(frame, "Robot", (x1, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 180), 1, cv2.LINE_AA)
 
     # Status overlay
     status_text = status.get('sop_status', 'idle')
@@ -161,7 +172,7 @@ def main():
     stream = RTSPStream(
         camera_id,
         config['rtsp_url'],
-        fps=15,
+        fps_cap=15,
         target_width=640,
         target_height=480
     )
@@ -183,7 +194,14 @@ def main():
     if model_path and os.path.exists(model_path):
         logger.info(f"Loading model: {model_path}")
         inference = InferenceEngine(model_path=model_path, num_threads=2)
-        hand_detector = HandDetector(camera_id, confidence_threshold=0.15)
+        conf_thres = config.get("ai", {}).get("conf_threshold") or config.get("conf_threshold") or 0.25
+        iou_thres = config.get("ai", {}).get("iou_threshold") or config.get("iou_threshold") or 0.45
+        hand_detector = HandDetector(
+            camera_id, 
+            confidence_threshold=conf_thres, 
+            iou_threshold=iou_thres, 
+            model_path=model_path
+        )
     else:
         logger.warning("Model not found, running in passthrough mode (no AI)")
         inference = None
@@ -218,6 +236,7 @@ def main():
     frame_count = 0
     cached_hands = []
     cached_products = []
+    cached_robots = []
     last_push_time = 0
     push_interval = config['push_interval']
     jpeg_quality = config['jpeg_quality']
@@ -235,17 +254,23 @@ def main():
             # AI Processing (every 2 frames)
             if hand_detector and inference and frame_count % 2 == 0:
                 detections = hand_detector.detect(frame)
-                cached_hands = [d for d in detections if d.get("class", "hand") == "hand"]
-                cached_products = [d for d in detections if d.get("class") == "product"]
+                cached_hands = [
+                    d for d in detections 
+                    if d.get("class", "hand") == "hand"
+                    and (d["bbox"][2] - d["bbox"][0]) <= frame.shape[1] * 0.35
+                    and (d["bbox"][3] - d["bbox"][1]) <= frame.shape[0] * 0.35
+                ]
+                cached_products = [d for d in detections if d.get("class") == "sp"]
+                cached_robots = [d for d in detections if d.get("class") == "robot"]
 
             # Update Engine FSM
             status = {"sop_status": "idle", "progress_percent": 0}
             if engine:
-                status = engine.update(cached_hands, cached_products)
+                status = engine.update(cached_hands, cached_products, cached_robots)
 
             # Annotate and draw
             display_frame = frame.copy()
-            display_frame = draw_annotations(display_frame, cached_hands, cached_products, engine, camera_id, status)
+            display_frame = draw_annotations(display_frame, cached_hands, cached_products, cached_robots, engine, camera_id, status)
 
             # Push to Hub at interval
             current_time = time.time()

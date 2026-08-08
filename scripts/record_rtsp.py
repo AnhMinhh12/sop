@@ -1,30 +1,15 @@
 """
 record_rtsp.py
 ==============
-Script quay video liên tục từ một (hoặc nhiều) nguồn RTSP/HTTP/file,
-sử dụng lại `shared.rtsp_manager.RTSPStream` để tận dụng auto-reconnect
-và FPS cap có sẵn trong project. Video đầu ra được ghi dưới dạng MP4
-(H.264 / yuv420p) — tương thích phát lại trên Windows Media Player,
-trình duyệt và đa số phần mềm giám sát.
+Quay 1 (hoặc nhiều) nguồn RTSP/HTTP, mỗi lần quay ra 1 file MP4 duy nhất.
+- Lấy fps + độ phân giải thực tế từ chính camera (không ép fps).
+- Chất lượng H.264 chỉnh bằng --crf (mặc định 23, giống x264 mặc định).
+- Tự dừng sau --duration; không truyền → chạy tới khi bấm Ctrl+C.
 
 Cách dùng:
-    # Quay 1 camera từ config mặc định
-    python scripts/record_rtsp.py --camera-id machine_07
-
-    # Quay 1 URL tùy ý
-    python scripts/record_rtsp.py --url "rtsp://user:pass@10.0.7.47:554/Streaming/Channels/102"
-
-    # Quay nhiều camera cùng lúc (đặt tên theo id trong config.yaml)
-    python scripts/record_rtsp.py --camera-id machine_07 --camera-id machine_08
-
-    # Ghi vào thư mục khác, mỗi segment 10 phút, tối đa ~500MB
-    python scripts/record_rtsp.py --camera-id machine_07 \
-        --output-dir D:/Videos/SOP \
-        --segment-seconds 600 \
-        --segment-max-mb 500
-
-    # Ghi thử 30 giây rồi thoát (tiện cho CI/smoke-test)
-    python scripts/record_rtsp.py --camera-id machine_07 --max-seconds 30
+    python scripts/record_rtsp.py --url "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/101"
+    python scripts/record_rtsp.py --camera-id machine_07 --duration 5min
+    python scripts/record_rtsp.py --url "rtsp://..." --output-dir D:/Videos --crf 18
 """
 
 from __future__ import annotations
@@ -32,6 +17,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import signal
 import sys
 import threading
@@ -39,12 +25,14 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Thêm project root vào sys.path để import được `shared.*`
+# Project root + env cho ConfigLoader
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+os.environ.setdefault("CONFIG_PATH", str(PROJECT_ROOT / "config" / "config.yaml"))
+os.environ.setdefault("SOP_DEFINITIONS_DIR", str(PROJECT_ROOT / "config" / "sop_definitions"))
 
-# Giảm tải CPU tương tự main.py
+# Hạn chế CPU
 import cv2  # noqa: E402
 
 cv2.setNumThreads(0)
@@ -60,11 +48,10 @@ logger = logging.getLogger("record_rtsp")
 
 
 # ---------------------------------------------------------------------------
-# Logging
+# Helpers
 # ---------------------------------------------------------------------------
 
 def setup_logging(log_file: Optional[str]) -> None:
-    """Cấu hình logging ra console + file."""
     handlers = [logging.StreamHandler(sys.stdout)]
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     if log_file:
@@ -73,55 +60,192 @@ def setup_logging(log_file: Optional[str]) -> None:
     logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers, force=True)
 
 
+def parse_duration(value: str) -> int:
+    """'30s' | '5min' | '2h' | '1d' → giây. Số nguyên → giây."""
+    s = str(value).strip().lower()
+    if not s:
+        raise argparse.ArgumentTypeError("duration rỗng")
+    if s.isdigit():
+        return int(s)
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*([a-z]+)$", s)
+    if not m:
+        raise argparse.ArgumentTypeError(f"duration không hợp lệ: '{value}' (vd: 30s, 5min, 2h, 1d)")
+    n = float(m.group(1))
+    mult = {
+        "s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+        "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+        "h": 3600, "hr": 3600, "hour": 3600, "hours": 3600,
+        "d": 86400, "day": 86400, "days": 86400,
+    }
+    unit = m.group(2)
+    if unit not in mult:
+        raise argparse.ArgumentTypeError(f"đơn vị không hợp lệ: '{unit}' (dùng s/min/h/d)")
+    return int(n * mult[unit])
+
+
+def human_duration(secs: int) -> str:
+    return f"{secs // 60}min" if secs >= 60 else f"{secs}s"
+
+
 # ---------------------------------------------------------------------------
-# Helpers
+# Interactive prompt
+# ---------------------------------------------------------------------------
+
+def _isatty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def ask(question: str, default: Optional[str] = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    sys.stdout.write(f"{question}{suffix}: ")
+    sys.stdout.flush()
+    try:
+        line = input().strip()
+    except EOFError:
+        line = ""
+    return line if line else (default or "")
+
+
+def ask_choice(question: str, choices: List[str], default: Optional[str] = None) -> str:
+    default = default if default in choices else (choices[0] if choices else None)
+    while True:
+        rendered = "/".join(f"[{c}]" if c == default else c for c in choices)
+        ans = ask(f"{question} ({rendered})", default=default)
+        if ans in choices:
+            return ans
+        sys.stdout.write(f"  → Vui lòng chọn một trong: {choices}\n")
+        sys.stdout.flush()
+
+
+def interactive_setup(args) -> None:
+    """Hỏi nguồn / thư mục / thời lượng / tên / crf khi user chưa truyền flag."""
+    if args.no_prompt:
+        return
+    if not _isatty():
+        return
+
+    args.camera_id = args.camera_id or []
+    args.url = args.url or []
+    args.name = args.name or []
+
+    sys.stdout.write("\n=== Thiết lập nhanh (Enter = mặc định) ===\n")
+
+    # 1) Nguồn
+    if not args.camera_id and not args.url:
+        while True:
+            kind = ask_choice(
+                "Loại nguồn (Enter để bỏ qua nếu không cần)",
+                choices=["url", "camera-id", "stop"],
+                default="stop",
+            )
+            if kind == "stop":
+                if not args.camera_id and not args.url:
+                    sys.stdout.write("  → Chưa có nguồn nào. Thử lại.\n")
+                    sys.stdout.flush()
+                    continue
+                break
+            if kind == "url":
+                val = ask("  Nhập RTSP/HTTP URL", default="")
+                if val:
+                    args.url.append(val)
+                    sys.stdout.write(f"  → Đã thêm URL: {val}\n")
+            else:
+                cfg = ConfigLoader.load_config() or {}
+                ids = [c.get("id", "") for c in cfg.get("cameras", []) if c.get("id")]
+                if ids:
+                    shown = ", ".join(ids[:5]) + ("…" if len(ids) > 5 else "")
+                    sys.stdout.write(f"  Camera IDs: {shown}\n")
+                val = ask("  Nhập camera-id", default="")
+                if val:
+                    args.camera_id.append(val)
+            sys.stdout.flush()
+            # Hỏi thêm nguồn
+            again = ask_choice("  Thêm nguồn nữa?", choices=["stop", "url", "camera-id"], default="stop")
+            if again == "stop":
+                break
+            # hack: đẩy lại vòng lặp bằng cách set kind
+            if again == "url":
+                val = ask("  Nhập RTSP/HTTP URL", default="")
+                if val:
+                    args.url.append(val)
+            else:
+                val = ask("  Nhập camera-id", default="")
+                if val:
+                    args.camera_id.append(val)
+            sys.stdout.flush()
+
+    # 2) Thư mục
+    if args.output_dir_was_default:
+        val = ask("Thư mục lưu video", default=args.output_dir)
+        if val:
+            args.output_dir = val
+
+    # 3) Thời lượng
+    while True:
+        raw = ask("Thời lượng quay (vd 30s, 5min, 2h, 1d) — Enter = vô hạn", default="")
+        if not raw:
+            args.duration = None
+            break
+        try:
+            args.duration = parse_duration(raw)
+            break
+        except argparse.ArgumentTypeError as e:
+            sys.stdout.write(f"  → {e}\n")
+            sys.stdout.flush()
+
+    # 4) crf
+    raw_crf = ask("Chất lượng H.264 (crf 0-51, 0=nét nhất, mặc định 23)", default=str(args.crf))
+    try:
+        if raw_crf:
+            args.crf = max(0, min(51, int(raw_crf)))
+    except ValueError:
+        sys.stdout.write("  → crf không hợp lệ, dùng mặc định 23\n")
+
+    # 5) Tên video
+    if args.name:
+        default_name = args.name[0]
+    elif args.camera_id:
+        default_name = args.camera_id[0]
+    elif args.url:
+        default_name = args.url[0].rsplit("/", 1)[-1] or "recording"
+    else:
+        default_name = "recording"
+
+    val = ask("Tên video (không cần .mp4)", default=default_name)
+    if val:
+        args.name = [val]
+    sys.stdout.write("=============================================\n\n")
+
+
+# ---------------------------------------------------------------------------
+# Nguồn + writer
 # ---------------------------------------------------------------------------
 
 def resolve_camera_config(camera_id: str) -> Dict:
-    """Tìm cấu hình camera theo `id` trong `config.yaml`."""
     cfg = ConfigLoader.load_config() or {}
     for cam in cfg.get("cameras", []):
         if cam.get("id") == camera_id:
             return cam
-    raise SystemExit(
-        f"[record_rtsp] Không tìm thấy camera id='{camera_id}' trong config.yaml"
-    )
+    raise SystemExit(f"[record_rtsp] Không tìm thấy camera id='{camera_id}' trong config.yaml")
 
 
-def build_stream(camera_cfg: Dict, fps_cap: int, width: int, height: int) -> RTSPStream:
-    """Tạo `RTSPStream` với các tham số đã chuẩn hóa."""
-    return RTSPStream(
-        camera_id=camera_cfg["id"],
-        rtsp_url=camera_cfg["rtsp_url"],
-        fps_cap=fps_cap,
-        target_width=width,
-        target_height=height,
-    )
-
-
-def make_writer(output_path: Path, fps: int, width: int, height: int):
-    """Tạo imageio writer (libx264 ultrafast) cho 1 segment."""
+def make_writer(output_path: Path, fps: float, width: int, height: int, crf: int):
+    # width/height hiện không được dùng (imageio tự suy từ frame đầu), nhưng
+    # vẫn khai báo để caller đọc code thấy ngay output size.
+    del width, height
     output_path.parent.mkdir(parents=True, exist_ok=True)
     return imageio.get_writer(
         str(output_path),
         fps=fps,
         codec="libx264",
         quality=None,
-        ffmpeg_params=["-preset", "ultrafast", "-crf", "28"],
+        ffmpeg_params=["-preset", "veryfast", "-crf", str(crf)],
         pixelformat="yuv420p",
         macro_block_size=1,
-        # Kích thước cố định giúp imageio set đúng size cho libx264
-        # (tránh warning nếu frame đầu tiên chưa về)
     )
-
-
-def open_new_segment(out_dir: Path, camera_id: str, fps: int, w: int, h: int):
-    """Mở file segment mới (theo timestamp hiện tại)."""
-    ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-    filename = f"{camera_id}_{ts}.mp4"
-    path = out_dir / filename
-    logger.info("[%s] New segment: %s", camera_id, path.name)
-    return path, make_writer(path, fps, w, h)
 
 
 # ---------------------------------------------------------------------------
@@ -129,49 +253,46 @@ def open_new_segment(out_dir: Path, camera_id: str, fps: int, w: int, h: int):
 # ---------------------------------------------------------------------------
 
 class CameraRecorder:
-    """Ghi liên tục từ 1 nguồn RTSP, tự rotate file theo thời gian/kích thước."""
+    """Quay 1 nguồn → 1 file MP4 duy nhất, fps + size lấy từ camera."""
 
     def __init__(
         self,
         camera_cfg: Dict,
-        output_dir: Path,
-        fps: int,
-        width: int = 640,
-        height: int = 480,
-        segment_seconds: int = 600,        # 10 phút / segment
-        segment_max_mb: float = 1024.0,    # ~1GB / segment
+        output_path: Path,
+        crf: int,
+        duration_seconds: Optional[int],
     ) -> None:
         self.cam_id = camera_cfg["id"]
-        self.camera_cfg = camera_cfg
-        self.output_dir = output_dir
-        self.fps = fps
-        self.width = width
-        self.height = height
-        self.segment_seconds = segment_seconds
-        self.segment_max_bytes = int(segment_max_mb * 1024 * 1024)
+        self.output_path = output_path
+        self.crf = crf
+        self.duration_seconds = duration_seconds
 
-        self.stream = build_stream(camera_cfg, fps, width, height)
+        # fps_cap đặt rất cao để RTSPStream không throttle — ta sẽ lấy fps
+        # thực từ cap và pacing theo wall-clock sau.
+        self.stream = RTSPStream(
+            camera_id=self.cam_id,
+            rtsp_url=camera_cfg["rtsp_url"],
+            fps_cap=60,
+            target_width=camera_cfg.get("target_width", 1280),
+            target_height=camera_cfg.get("target_height", 720),
+        )
+
+        self.fps: float = 25.0
+        self.width: int = 1280
+        self.height: int = 720
 
         self._writer = None
-        self._current_path: Optional[Path] = None
-        self._segment_start_ts: float = 0.0
-        self._frames_written: int = 0
-
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-
-        # Thống kê
         self.total_frames = 0
-        self.total_segments = 0
 
-    # -- public ------------------------------------------------------------
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self.stream.start()
         self._thread = threading.Thread(target=self._run, name=f"Recorder-{self.cam_id}", daemon=True)
         self._thread.start()
-        logger.info("[%s] Recorder started.", self.cam_id)
+        logger.info("[%s] Recorder started. → %s", self.cam_id, self.output_path.name)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -179,90 +300,87 @@ class CameraRecorder:
             self._thread.join(timeout=5)
         self.stream.stop()
         self._close_writer()
-        logger.info(
-            "[%s] Recorder stopped. Total frames=%d, segments=%d",
-            self.cam_id, self.total_frames, self.total_segments
-        )
-
-    # -- segment handling -------------------------------------------------
-    def _maybe_rotate(self) -> None:
-        """Rotate nếu quá segment_seconds HOẶC file vượt segment_max_bytes."""
-        if self._writer is None:
-            return
-        elapsed = time.time() - self._segment_start_ts
-        size = self._current_path.stat().st_size if self._current_path and self._current_path.exists() else 0
-        if elapsed >= self.segment_seconds or size >= self.segment_max_bytes:
-            logger.info(
-                "[%s] Rotating segment (elapsed=%.1fs, size=%.1fMB)",
-                self.cam_id, elapsed, size / (1024 * 1024)
-            )
-            self._close_writer()
-            self.total_segments += 1
+        logger.info("[%s] Recorder stopped. Total frames=%d", self.cam_id, self.total_frames)
 
     def _close_writer(self) -> None:
         if self._writer is not None:
             try:
                 self._writer.close()
-            except Exception as e:  # pragma: no cover - defensive
+            except Exception as e:
                 logger.warning("[%s] Writer close error: %s", self.cam_id, e)
             self._writer = None
 
-    # -- main loop --------------------------------------------------------
     def _run(self) -> None:
-        """Vòng lặp chính: đợi stream sẵn sàng → ghi frame → rotate khi cần."""
-        # Chờ stream có frame đầu tiên (để biết kích thước thực tế)
+        # Đợi frame đầu tiên để biết fps + size thực
         wait_start = time.time()
         while not self._stop_event.is_set():
             frame = self.stream.get_frame()
             if frame is not None:
+                # Cố lấy fps + size từ OpenCV nếu RTSPStream có giữ cap
+                if getattr(self.stream, "cap", None) is not None:
+                    try:
+                        cap = self.stream.cap
+                        f = cap.get(cv2.CAP_PROP_FPS)
+                        if f and f > 0:
+                            self.fps = float(f)
+                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        if w > 0 and h > 0:
+                            self.width, self.height = w, h
+                    except Exception:
+                        pass
+                # Fallback: lấy size từ frame
                 self.height, self.width = frame.shape[:2]
                 break
             if time.time() - wait_start > 15:
-                logger.warning("[%s] No frame from stream yet (waited 15s). Retrying...", self.cam_id)
+                logger.warning("[%s] No frame from stream yet (15s). Retrying...", self.cam_id)
                 wait_start = time.time()
             time.sleep(0.1)
 
         if self._stop_event.is_set():
             return
 
+        # Mở writer
+        self._writer = make_writer(self.output_path, self.fps, self.width, self.height, self.crf)
+        logger.info("[%s] Writing: fps=%.2f, size=%dx%d, crf=%d",
+                    self.cam_id, self.fps, self.width, self.height, self.crf)
+
+        frame_period = 1.0 / max(self.fps, 1.0)
+        next_due = time.time()
+        deadline = time.time() + self.duration_seconds if self.duration_seconds else None
         last_log = time.time()
+
         while not self._stop_event.is_set():
-            self._maybe_rotate()
+            if deadline and time.time() >= deadline:
+                logger.info("[%s] Reached duration, stopping.", self.cam_id)
+                break
+
+            now = time.time()
+            if now < next_due:
+                time.sleep(min(0.05, next_due - now))
+                continue
+            if next_due < now - frame_period * 2:
+                next_due = now  # chống burst nếu loop bị stall
+            next_due += frame_period
 
             frame = self.stream.get_frame()
             if frame is None:
-                time.sleep(0.05)
                 continue
-
-            if self._writer is None:
-                self._current_path, self._writer = open_new_segment(
-                    self.output_dir, self.cam_id, self.fps, self.width, self.height
-                )
-                self._segment_start_ts = time.time()
-                self._frames_written = 0
 
             try:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 self._writer.append_data(rgb)
-                self._frames_written += 1
                 self.total_frames += 1
             except Exception as e:
                 logger.exception("[%s] Write frame error: %s", self.cam_id, e)
                 self._close_writer()
                 time.sleep(0.5)
+                return
 
-            # Log trạng thái mỗi 10s
-            now = time.time()
             if now - last_log >= 10:
-                size_mb = (
-                    self._current_path.stat().st_size / (1024 * 1024)
-                    if self._current_path and self._current_path.exists() else 0.0
-                )
-                logger.info(
-                    "[%s] frames=%d, segment_frames=%d, size=%.1fMB, elapsed=%.0fs",
-                    self.cam_id, self.total_frames, self._frames_written, size_mb,
-                    now - self._segment_start_ts
-                )
+                size_mb = self.output_path.stat().st_size / (1024 * 1024) if self.output_path.exists() else 0
+                logger.info("[%s] frames=%d, size=%.1fMB",
+                            self.cam_id, self.total_frames, size_mb)
                 last_log = now
 
 
@@ -271,45 +389,34 @@ class CameraRecorder:
 # ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Record RTSP stream(s) to MP4 continuously.")
+    p = argparse.ArgumentParser(description="Record RTSP to a single MP4 file.")
     src = p.add_mutually_exclusive_group(required=False)
-    src.add_argument(
-        "--camera-id",
-        action="append",
-        help="ID camera trong config.yaml. Có thể truyền nhiều lần. Bỏ trống nếu dùng --url.",
-    )
-    src.add_argument(
-        "--url",
-        action="append",
-        help="RTSP/HTTP/file URL trực tiếp. Có thể truyền nhiều lần.",
-    )
+    src.add_argument("--camera-id", action="append", help="Camera id từ config.yaml (lặp lại được).")
+    src.add_argument("--url", action="append", help="RTSP/HTTP URL (lặp lại được).")
     p.add_argument(
         "--output-dir",
-        default=os.getenv("RECORDINGS_DIR", "data/recordings"),
-        help="Thư mục lưu video (mặc định: data/recordings)",
+        default=os.getenv("RECORDINGS_DIR", str(PROJECT_ROOT / "data" / "recordings")),
+        help="Thư mục lưu video (mặc định: <project_root>/data/recordings).",
     )
-    p.add_argument("--fps", type=int, default=15, help="FPS ghi (mặc định: 15)")
-    p.add_argument("--width", type=int, default=640, help="Chiều rộng (mặc định: 640)")
-    p.add_argument("--height", type=int, default=480, help="Chiều cao (mặc định: 480)")
-    p.add_argument("--segment-seconds", type=int, default=600, help="Thời gian tối đa / segment (giây)")
-    p.add_argument("--segment-max-mb", type=float, default=1024.0, help="Dung lượng tối đa / segment (MB)")
-    p.add_argument("--max-seconds", type=int, default=0, help="Dừng sau N giây (0 = chạy vô hạn)")
+    p.add_argument("--no-prompt", action="store_true", help="Tắt hỏi tương tác.")
     p.add_argument(
-        "--name",
-        action="append",
-        help="Tên hiển thị cho mỗi nguồn (khi dùng --url). Mặc định: stream_1, stream_2, ...",
+        "--duration", type=parse_duration, default=None,
+        help="Thời gian quay tối đa (vd: 30s, 5min, 2h). Mặc định: chạy tới Ctrl+C.",
     )
-    p.add_argument("--log-file", default=None, help="File log (mặc định: chỉ in ra console)")
+    p.add_argument(
+        "--crf", type=int, default=23,
+        help="Chất lượng H.264 (0-51, 0=nét nhất, mặc định 23).",
+    )
+    p.add_argument("--name", action="append", help="Tên file (không cần .mp4).")
+    p.add_argument("--log-file", default=None, help="File log.")
     return p.parse_args()
 
 
 def collect_sources(args) -> List[Dict]:
-    """Kết hợp --camera-id và --url thành danh sách camera_cfg-like dicts."""
     sources: List[Dict] = []
     if args.camera_id:
         for cid in args.camera_id:
-            cfg = resolve_camera_config(cid)
-            sources.append(cfg)
+            sources.append(resolve_camera_config(cid))
     if args.url:
         for idx, url in enumerate(args.url):
             name = (args.name[idx] if args.name and idx < len(args.name) else f"stream_{idx + 1}")
@@ -319,9 +426,20 @@ def collect_sources(args) -> List[Dict]:
     return sources
 
 
+def build_output_path(out_dir: Path, source: Dict, suffix: str = "") -> Path:
+    ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    return out_dir / f"{source['id']}_{ts}{suffix}.mp4"
+
+
 def main() -> int:
+    raw_argv = sys.argv[1:]
     args = parse_args()
     setup_logging(args.log_file)
+
+    args.output_dir_was_default = not any(
+        a == "--output-dir" or a.startswith("--output-dir=") for a in raw_argv
+    )
+    interactive_setup(args)
 
     sources = collect_sources(args)
     out_dir = Path(args.output_dir)
@@ -329,21 +447,19 @@ def main() -> int:
 
     recorders: Dict[str, CameraRecorder] = {}
     for cfg in sources:
+        suffix = f"_{human_duration(args.duration)}" if args.duration else ""
+        out_path = build_output_path(out_dir, cfg, suffix=suffix)
         rec = CameraRecorder(
             camera_cfg=cfg,
-            output_dir=out_dir,
-            fps=args.fps,
-            width=args.width,
-            height=args.height,
-            segment_seconds=args.segment_seconds,
-            segment_max_mb=args.segment_max_mb,
+            output_path=out_path,
+            crf=args.crf,
+            duration_seconds=args.duration,
         )
         recorders[cfg["id"]] = rec
         rec.start()
 
-    # Graceful shutdown: Ctrl+C
     def _shutdown(signum, frame):
-        logger.info("Shutdown signal (%s) received. Stopping recorders...", signum)
+        logger.info("Shutdown signal (%s). Stopping recorders...", signum)
         for rec in recorders.values():
             rec.stop()
         sys.exit(0)
@@ -351,29 +467,25 @@ def main() -> int:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    logger.info("Recording %d source(s) into '%s'. Press Ctrl+C to stop.", len(sources), out_dir)
+    logger.info("Recording %d source(s) into '%s'. Ctrl+C to stop.", len(sources), out_dir)
 
-    if args.max_seconds and args.max_seconds > 0:
-        # Chế độ chạy có thời hạn — phù hợp smoke-test
-        deadline = time.time() + args.max_seconds
-        try:
+    # Đợi: nếu có duration thì đợi tới deadline / Ctrl+C; nếu không thì chờ Ctrl+C
+    try:
+        if args.duration:
+            deadline = time.time() + args.duration
             while time.time() < deadline:
                 time.sleep(0.5)
-        except KeyboardInterrupt:
-            pass
-        finally:
             for rec in recorders.values():
                 rec.stop()
-    else:
-        # Chế độ chạy vô hạn
-        try:
+            logger.info("Đã quay đủ %s. Kết thúc.", human_duration(args.duration))
+        else:
             while True:
                 time.sleep(1)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            for rec in recorders.values():
-                rec.stop()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for rec in recorders.values():
+            rec.stop()
 
     return 0
 
