@@ -288,30 +288,9 @@ class ProductEngine(BaseEngine):
                 self.reset(now=now)
 
         if self.is_failed:
-            step_1 = self.sop_steps[0]
-            step_1_zones = self._get_all_zones_for_step(step_1)
-            
-            # Sử dụng self.hand_states làm nguồn dữ liệu chính xác để xác định tay đã giữ vững trong vùng Bước 1 ít nhất 0.2s
-            is_in_s1_zone_sustained = False
-            for side in ["left", "right"]:
-                for z in step_1_zones:
-                    if self._is_in_zone(side, z):
-                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
-                        if entry > 0.0 and (now - entry >= 0.2):
-                            is_in_s1_zone_sustained = True
-                            break
-                if is_in_s1_zone_sustained:
-                    break
-                    
-            if is_in_s1_zone_sustained:
-                self.log_debug("Phát hiện tay quay lại Bước 1 khi đang bị lỗi. Tự động reset và bắt đầu chu kỳ mới.", self.product_id)
-                self.reset(now=now)
-                self.cycle_count += 1
-                self.waiting_for_start = False
-                self.cycle_start_time = now
-                self.start_zone_entry_time = 0
-            else:
-                return self._get_status_result(active_zones, "violation", violation_type=self.violation_type)
+            # Khi đang bị lỗi, chỉ cho phép Robot vào khuôn tự động reset (đã xử lý ở phần check robot).
+            # Tay công nhân quay lại bước 1 không được tính để reset chu kỳ.
+            return self._get_status_result(active_zones, "violation", violation_type=self.violation_type)
 
         if self.current_step_idx < len(self.sop_steps):
             current_step = self.sop_steps[self.current_step_idx]
@@ -357,74 +336,8 @@ class ProductEngine(BaseEngine):
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
-            if 0 < self.current_step_idx <= self.restart_threshold and self.s1_withdrawn:
-                step_1 = self.sop_steps[0]
-                s1_zones = self._get_all_zones_for_step(step_1)
-                
-                # Chỉ check nếu vùng Bước 1 không nằm trong các vùng bước hiện tại và vùng bước tiếp theo
-                if not any(z in current_zones for z in s1_zones):
-                    next_zones = []
-                    if self.current_step_idx + 1 < len(self.sop_steps):
-                        next_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx + 1])
-                    
-                    if not any(z in next_zones for z in s1_zones):
-                        # Tránh trùng lặp khi vừa hoàn thành bước trước
-                        if not any(z == self.last_completed_zone and (now - self.last_completed_time < 1.0) for z in s1_zones):
-                            # Chỉ tự động reset khi tay quay lại bước 1 (sau khi bước hiện tại bắt đầu) và giữ vững ít nhất 0.2s
-                            is_in_s1 = any(self._is_in_zone(side, z, centroid_only=False) for side in ["left", "right"] for z in s1_zones)
-                            is_in_s1_sustained = False
-                            for side in ["left", "right"]:
-                                for z in s1_zones:
-                                    if self._is_in_zone(side, z):
-                                        entry = self.hand_states[side]["entry_time"] if self.hand_states[side]["zone"] == z else now
-                                        if entry > self.step_start_time and (now - entry >= 0.2):
-                                            is_in_s1_sustained = True
-                                            break
-                                if is_in_s1_sustained:
-                                    break
-                                    
-                            if is_in_s1_sustained:
-                                self.log_debug(f"Quay lại bước 1 phát hiện ở bước {self.current_step_idx}. Tự động bắt đầu chu kỳ mới lập tức (Chu kỳ {self.cycle_count + 1})", self.product_id)
-                                
-                                # Reset trạng thái động cơ logic về chu kỳ mới lập tức (KHÔNG BÁO LỖI VI PHẠM)
-                                self.reset(now=now)
-                                self.cycle_count += 1
-                                self.waiting_for_start = False
-                                self.cycle_start_time = now
-                                self.start_zone_entry_time = 0
-                                
-                                # Tính luôn bước 1 của chu kỳ mới cho frame này từ chính hands_data hiện tại
-                                self._check_step_logic(step_1, now, update_status=True)
-                                
-                                # Cập nhật lại active_zones theo chu kỳ mới
-                                active_zones_new = {"left": None, "right": None}
-                                for hand in hands_data:
-                                    side = hand["label"].lower()
-                                    if side not in ["left", "right"]: continue
-                                    centroid = hand["centroid"]
-                                    bbox = hand["bbox"]
-                                    w, h = self.config.get("w", 640), self.config.get("h", 480)
-                                    test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
-                                                   [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-                                    
-                                    current_zone = None
-                                    current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
-                                    for z_name in current_step_zones:
-                                        z_pts = self.zones.get(z_name)
-                                        if z_pts:
-                                            poly = np.array(z_pts, np.float32)
-                                            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                                                current_zone = z_name
-                                                break
-                                    active_zones_new[side] = current_zone
-                                    self.hand_states[side]["zone"] = current_zone
-                                    self.hand_states[side]["entry_time"] = now
-                                
-                                return self._get_status_result(active_zones_new, "processing")
-                            else:
-                                if not is_in_s1:
-                                    self.start_zone_entry_time = 0
-            elif self.current_step_idx > self.restart_threshold and self.current_step_idx < len(self.sop_steps) - 1 and self.s1_withdrawn and (now - self.last_completed_time > 2.5) and not is_in_current_area:
+            # ĐÃ BỎ: Chỉ đếm chu kỳ khi tay robot vào khuôn, không cho phép tay công nhân reset chu kỳ mới.
+            if self.current_step_idx > self.restart_threshold and self.current_step_idx < len(self.sop_steps) - 1 and self.s1_withdrawn and (now - self.last_completed_time > 2.5) and not is_in_current_area:
                 step_1 = self.sop_steps[0]
                 s1_zones = self._get_all_zones_for_step(step_1)
                 
