@@ -31,8 +31,8 @@ import subprocess
 from pathlib import Path
 
 # ==== CẤU HÌNH - ĐÃ CẬP NHẬT THEO DATASET MỚI ====
-DRIVE_DATASET_ZIP = "/content/drive/MyDrive/tff4040_08_08.zip"
-DRIVE_DATASET_DIR = "/content/tff4040_08_08"
+DRIVE_DATASET_ZIP = "/content/drive/MyDrive/tff4040.v3-afternoon.yolov8.zip"
+DRIVE_DATASET_DIR = "/content/tff4040.v3-afternoon.yolov8"
 DATA_YAML = os.path.join(DRIVE_DATASET_DIR, "data.yaml")
 DRIVE_PROJECT_DIR = "/content/drive/MyDrive/yolo_runs"
 
@@ -118,7 +118,7 @@ if os.path.exists(DRIVE_DATASET_ZIP):
     print("- Giải nén xong.")
 else:
     # Nếu không có zip, mà user upload thư mục lên Drive
-    drive_folder = "/content/drive/MyDrive/tff4040_08_08"
+    drive_folder = "/content/drive/MyDrive/tff4040.v3-afternoon.yolov8"
     if os.path.exists(drive_folder):
         print(f"- Copy dataset từ Drive vào {DRIVE_DATASET_DIR} để train nhanh hơn...")
         sh(f"cp -r '{drive_folder}' '{DRIVE_DATASET_DIR}'")
@@ -130,7 +130,7 @@ if not os.path.exists(DATA_YAML):
     search_path = list(Path(DRIVE_DATASET_DIR).rglob("data.yaml")) + list(Path(DRIVE_DATASET_DIR).rglob("data.yml"))
     if not search_path and os.path.exists("/content/drive/MyDrive/"):
         # Tìm rộng hơn trong MyDrive phòng trường hợp khác
-        search_path = list(Path("/content/drive/MyDrive/").glob("**/tff4040_08_08/**/data.yaml"))
+        search_path = list(Path("/content/drive/MyDrive/").glob("**/tff4040.v3-afternoon.yolov8/**/data.yaml"))
     
     if search_path:
         actual_yaml = str(search_path[0])
@@ -325,9 +325,9 @@ model.export(
     dynamic=False,
 )
 
-# Di chuyển và đổi tên thành TFF4040_final.onnx
+# Di chuyển và đổi tên thành TFF4040_final2.onnx
 best_onnx_source = best_weights.replace(".pt", ".onnx")
-onnx_path = os.path.join(EXPORT_DIR, "TFF4040_final.onnx")
+onnx_path = os.path.join(EXPORT_DIR, "TFF4040_final2.onnx")
 
 if os.path.exists(best_onnx_source):
     shutil.copy2(best_onnx_source, onnx_path)
@@ -408,9 +408,9 @@ for f in ["best.pt", "last.pt"]:
         shutil.copy2(src, dst)
         print(f"  Backup PyTorch model → {dst}")
 
-# Copy TFF4040_final.onnx
+# Copy TFF4040_final2.onnx
 if os.path.exists(onnx_path):
-    dst_onnx = os.path.join(SAFE_DIR, "TFF4040_final.onnx")
+    dst_onnx = os.path.join(SAFE_DIR, "TFF4040_final2.onnx")
     shutil.copy2(onnx_path, dst_onnx)
     print(f"  Backup ONNX model → {dst_onnx}")
 
@@ -424,14 +424,14 @@ print("\n" + "=" * 60)
 print("✅ HOÀN TẤT")
 print("=" * 60)
 
-final_onnx = os.path.join(SAFE_DIR, "TFF4040_final.onnx")
+final_onnx = os.path.join(SAFE_DIR, "TFF4040_final2.onnx")
 final_pt = os.path.join(SAFE_DIR, "tff4040_v2_best.pt")
 
 print(f"""
 📁 FILES CẦN TẢI VỀ (từ Google Drive của bạn):
 
    1. {final_onnx}
-      ← File model ONNX dùng để chạy deploy thực tế (đầu ra: TFF4040_final.onnx)
+      ← File model ONNX dùng để chạy deploy thực tế (đầu ra: TFF4040_final2.onnx)
 
    2. {final_pt}
       ← File model PyTorch gốc để lưu trữ / retrain sau này nếu cần
@@ -442,9 +442,9 @@ print(f"""
 
    1. Truy cập Google Drive cá nhân.
    2. Tìm thư mục: yolo_safe_backup_v2/
-   3. Tải file "TFF4040_final.onnx" và "tff4040_v2_best.pt" về máy.
-   4. Copy file "TFF4040_final.onnx" vào dự án local tại đường dẫn:
-      shared/models/yolo/TFF4040_final.onnx (hoặc cập nhật config.yaml trỏ tới tên file này)
+   3. Tải file "TFF4040_final2.onnx" và "tff4040_v2_best.pt" về máy.
+   4. Copy file "TFF4040_final2.onnx" vào dự án local tại đường dẫn:
+      shared/models/yolo/TFF4040_final2.onnx (hoặc cập nhật config.yaml trỏ tới tên file này)
 """)
 
 # Xác minh file thực sự có mặt trong backup

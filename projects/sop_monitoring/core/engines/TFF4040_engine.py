@@ -84,6 +84,47 @@ class ProductEngine(BaseEngine):
         self.last_hands = hands_data
         self.last_products = products_data if products_data is not None else []
         self.last_robots = robot_data if robot_data is not None else []
+
+        # Nếu có cờ chờ khởi động lại từ Robot ở frame trước
+        if getattr(self, "pending_robot_restart", False):
+            self.pending_robot_restart = False
+            if hasattr(self, "missing_steps_str"):
+                delattr(self, "missing_steps_str")
+            self.reset(now=now)
+            self.cycle_count += 1
+            self.waiting_for_start = False
+            self.cycle_start_time = now
+            self.start_zone_entry_time = 0.0
+            self.robot_in_mold_start_time = now
+            
+            # Tính luôn bước 1 của chu kỳ mới cho frame này
+            step_1 = self.sop_steps[0]
+            self._check_step_logic(step_1, now, update_status=True)
+            
+            active_zones_new = {"left": None, "right": None}
+            for hand in hands_data:
+                side = hand["label"].lower()
+                if side not in ["left", "right"]: continue
+                centroid = hand["centroid"]
+                bbox = hand["bbox"]
+                w, h = self.config.get("w", 640), self.config.get("h", 480)
+                test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
+                               [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
+                
+                current_zone = None
+                current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
+                for z_name in current_step_zones:
+                    z_pts = self.zones.get(z_name)
+                    if z_pts:
+                        poly = np.array(z_pts, np.float32)
+                        if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
+                            current_zone = z_name
+                            break
+                active_zones_new[side] = current_zone
+                self.hand_states[side]["zone"] = current_zone
+                self.hand_states[side]["entry_time"] = now
+            
+            return self._get_status_result(active_zones_new, "processing")
         
         # Cập nhật trạng thái rút tay của bước 1 cho frame sau, lưu trạng thái trước đó lại
         was_s1_withdrawn = self.s1_withdrawn
@@ -101,10 +142,28 @@ class ProductEngine(BaseEngine):
                 self.robot_in_mold_start_time = now
             min_dwell = step_1.get("min_dwell_sec", 0.3)
             if now - self.robot_in_mold_start_time >= min_dwell:
-                if (self.current_step_idx > 0 and not self.waiting_for_start) or self.is_failed:
+                # Nếu chu kỳ cũ chưa hoàn thành (và chưa ở trạng thái lỗi)
+                if self.current_step_idx > 0 and not self.waiting_for_start and not self.is_failed:
+                    # Báo thiếu các bước chưa làm xong của chu kỳ cũ
+                    missing_steps = [s["step_name"] for s in self.sop_steps[self.current_step_idx:]]
+                    self.missing_steps_str = f"Thiếu: {', '.join(missing_steps)}"
+                    self.is_failed = True
+                    self.violation_type = "skip_step"
+                    self.failed_step_idx = self.current_step_idx
+                    self.pending_robot_restart = True
+                    
                     self.log_debug(
-                        f"Phát hiện Robot trong khuôn (>= {min_dwell}s) khi chu kỳ cũ chưa xong hoặc bị lỗi "
-                        f"(Step {self.current_step_idx}, failed={self.is_failed}). Bắt đầu chu kỳ mới lập tức.", 
+                        f"Phát hiện Robot trong khuôn (>= {min_dwell}s) khi chu kỳ cũ chưa xong (Step {self.current_step_idx}). "
+                        f"Báo lỗi thiếu các bước: {missing_steps}. Sẽ khởi động chu kỳ mới ở frame tiếp theo.", 
+                        self.product_id
+                    )
+                    active_zones = {"left": None, "right": None}
+                    return self._get_status_result(active_zones, "violation", violation_type="skip_step")
+                
+                # Nếu đang ở trạng thái lỗi sẵn rồi, hoặc robot vào khuôn để bắt đầu lại
+                elif self.is_failed or (self.current_step_idx > 0 and not self.waiting_for_start):
+                    self.log_debug(
+                        f"Phát hiện Robot trong khuôn (>= {min_dwell}s) khi đang bị lỗi hoặc chu kỳ cũ chưa xong. Bắt đầu chu kỳ mới lập tức.", 
                         self.product_id
                     )
                     self.reset(now=now)
@@ -288,8 +347,14 @@ class ProductEngine(BaseEngine):
                     self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
 
-            # ĐÃ BỎ GIỚI HẠN THỜI GIAN CHU KỲ VÀ THỜI GIAN BƯỚC THEO YÊU CẦU CỦA USER
-            pass
+            # Lỗi vi phạm quá thời gian chu kỳ (36 giây kể từ lúc bắt đầu chu kỳ)
+            cycle_elapsed = now - self.cycle_start_time
+            if cycle_elapsed > 36.0:
+                self.is_failed = True
+                self.violation_type = "timeout"
+                self.failed_step_idx = self.current_step_idx
+                self.log_debug(f"VIOLATION: Cycle Timeout (>36s) at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
+                return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
             if 0 < self.current_step_idx <= self.restart_threshold and self.s1_withdrawn:
@@ -436,6 +501,8 @@ class ProductEngine(BaseEngine):
         self.start_zone_entry_time = 0.0
         self.cycle_start_time = 0.0
         self.robot_in_mold_start_time = 0.0
+        if hasattr(self, "missing_steps_str"):
+            delattr(self, "missing_steps_str")
         self.hand_states = {
             "left": {"zone": None, "entry_time": 0.0},
             "right": {"zone": None, "entry_time": 0.0}
@@ -490,7 +557,14 @@ class ProductEngine(BaseEngine):
             if zone: detected_parts.append(f"{side[0].upper()}:{zone}")
         detected_label = ", ".join(detected_parts) if detected_parts else "Idle"
 
-        cycle_time_left = 999.0
+        if self.waiting_for_start:
+            cycle_time_left = 36.0
+        elif self.is_failed:
+            cycle_time_left = 0.0
+        elif self.current_step_idx >= len(self.sop_steps):
+            cycle_time_left = 0.0
+        else:
+            cycle_time_left = max(0.0, 36.0 - (self.last_update_time - self.cycle_start_time))
 
         res = {
             "sop_status": status,
@@ -505,7 +579,8 @@ class ProductEngine(BaseEngine):
             "cycle_count": self.cycle_count,
             "hands_info": active_zones,
             "step_list": step_list,
-            "cycle_time_left": cycle_time_left
+            "cycle_time_left": cycle_time_left,
+            "max_cycle_time": 36.0
         }
 
         if self.is_failed:
@@ -530,6 +605,8 @@ class ProductEngine(BaseEngine):
                 "progress_percent": 0,
                 "cycle_time_left": 0.0
             })
+            if hasattr(self, "missing_steps_str") and self.missing_steps_str:
+                res["expected_step"] = self.missing_steps_str
         return res
 
     def _check_step_logic(self, step: Dict, now: float, update_status: bool = True, centroid_only: bool = False, shrink_factor: float = 0.0) -> bool:

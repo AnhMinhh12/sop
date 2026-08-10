@@ -412,7 +412,8 @@ class ProductEngine(BaseEngine):
             "cycle_count": self.cycle_count,
             "hands_info": active_zones,
             "step_list": step_list,
-            "cycle_time_left": cycle_time_left
+            "cycle_time_left": cycle_time_left,
+            "max_cycle_time": 38.0
         }
 
         if self.is_failed:

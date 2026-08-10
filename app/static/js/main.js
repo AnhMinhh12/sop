@@ -723,7 +723,8 @@ socket.on('step_update', (data) => {
     if (cycle_time_left !== undefined) {
         if (countdownVal) countdownVal.innerText = `${cycle_time_left.toFixed(1)}s`;
         if (countdownFill) {
-            const percentage = (cycle_time_left / 38.0) * 100;
+            const maxCycleTime = data.max_cycle_time || 38.0;
+            const percentage = (cycle_time_left / maxCycleTime) * 100;
             countdownFill.style.width = `${percentage}%`;
             
             // Remove previous classes

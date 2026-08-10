@@ -169,6 +169,7 @@ def extract(
     out_dir: Path,
     class_name: str,
     interval_s: float,
+    frame_step: int,
     max_frames: int,
     quality: int,
     resume: bool,
@@ -188,17 +189,22 @@ def extract(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_s = total_frames / fps if fps > 0 else 0
 
-    if interval_s <= 0:
-        cap.release()
-        raise ValueError(f"--interval phải > 0 (nhận {interval_s})")
+    if frame_step > 0:
+        frames_per_interval = frame_step
+        desc_str = f"mỗi {frames_per_interval} frame lấy 1"
+    else:
+        if interval_s <= 0:
+            cap.release()
+            raise ValueError(f"--interval hoặc --frame-step phải lớn hơn 0")
+        frames_per_interval = max(1, round(fps * interval_s))
+        desc_str = f"interval={interval_s}s → mỗi {frames_per_interval} frame lấy 1"
 
-    frames_per_interval = max(1, round(fps * interval_s))
     start_idx = next_index(out_dir, class_name) if resume else 1
 
     logger.info(
-        "[%s] video=%s, fps=%.2f, total=%d frames (%.1fs). interval=%ss → mỗi %d frame lấy 1. start_idx=%d",
+        "[%s] video=%s, fps=%.2f, total=%d frames (%.1fs). %s. start_idx=%d",
         class_name, video_path.name, fps, total_frames, duration_s,
-        interval_s, frames_per_interval, start_idx,
+        desc_str, start_idx,
     )
 
     # Cho phép Ctrl+C dừng gọn
@@ -231,20 +237,7 @@ def extract(
             if not ok or frame is None:
                 break
 
-            should_save = (
-                read_idx % frames_per_interval == 0
-                and (start_idx == 1 or read_idx >= 0)
-            )
-            # Nếu resume: không ghi đè frame đã có. Vì start_idx > 1 nghĩa là ta
-            # bắt đầu lại từ đầu video và bỏ qua các frame đã ghi.
-            # Với cách này, "resume" chỉ có nghĩa khi video lặp lại hoàn toàn
-            # (cùng tên, cùng độ dài) — thực tế đếm theo thứ tự frame đọc.
-            # Đơn giản nhất: nếu resume và start_idx > 1, ta skip các ảnh đầu
-            # để tên file tiếp tục đúng.
-            if should_save and resume and (start_idx - 1) > (read_idx // frames_per_interval):
-                read_idx += 1
-                continue
-
+            should_save = (read_idx % frames_per_interval == 0)
             if should_save:
                 filename = f"img_{class_name}_{idx:06d}.jpg"
                 out_path = out_dir / filename
@@ -304,6 +297,10 @@ def parse_args() -> argparse.Namespace:
         help="Lấy 1 frame mỗi N giây (mặc định: 5).",
     )
     p.add_argument(
+        "--frame-step", type=int, default=0,
+        help="Lấy 1 frame mỗi N frame (mặc định: 0, ưu tiên hơn --interval nếu > 0).",
+    )
+    p.add_argument(
         "--max-frames", type=int, default=0,
         help="Giới hạn số frame xuất / video (0 = không giới hạn).",
     )
@@ -340,7 +337,8 @@ def pair_videos_and_classes(
         elif classes:
             cls = classes[-1]
         else:
-            cls = default_class_for(v)
+            # Tên thư mục lưu ảnh giống tên file video + _pic
+            cls = f"{v.stem}_pic"
         pairs.append((v, cls))
     return pairs
 
@@ -351,14 +349,38 @@ def main() -> int:
 
     # TTY + chưa có --video và chưa --no-prompt → hỏi
     videos = [Path(v) for v in args.video]
-    if not videos and not args.no_prompt and _isatty():
-        sys.stdout.write("\n=== Tách frame để gán nhãn ===\n")
-        sys.stdout.flush()
-        picked = interactive_pick_videos()
-        videos = picked
+    if not args.no_prompt and _isatty():
         if not videos:
-            sys.stdout.write("Không có video nào. Thoát.\n")
-            return 1
+            sys.stdout.write("\n=== Tách frame để gán nhãn ===\n")
+            sys.stdout.flush()
+            picked = interactive_pick_videos()
+            videos = picked
+            if not videos:
+                sys.stdout.write("Không có video nào. Thoát.\n")
+                return 1
+
+        # Hỏi khoảng cách tách ảnh
+        sys.stdout.write("\n=== Cấu hình khoảng cách tách ảnh ===\n")
+        sys.stdout.flush()
+        mode = ask_choice("Chọn đơn vị khoảng cách", choices=["giay", "frame"], default="giay")
+        if mode == "giay":
+            ans = ask("Nhập số giây giữa các frame", default="5.0")
+            try:
+                args.interval = float(ans)
+                args.frame_step = 0
+            except ValueError:
+                sys.stdout.write("  → Giá trị không hợp lệ. Sử dụng mặc định 5.0 giây.\n")
+                args.interval = 5.0
+                args.frame_step = 0
+        else:
+            ans = ask("Nhập số frame giữa các ảnh", default="100")
+            try:
+                args.frame_step = int(ans)
+                args.interval = 0.0
+            except ValueError:
+                sys.stdout.write("  → Giá trị không hợp lệ. Sử dụng mặc định 100 frame.\n")
+                args.frame_step = 100
+                args.interval = 0.0
 
     if not videos:
         raise SystemExit("[extract_frames] Cần ít nhất một --video.")
@@ -369,8 +391,8 @@ def main() -> int:
     pairs = pair_videos_and_classes(videos, args.class_name)
 
     logger.info(
-        "Extract %d video(s) → %s (interval=%ss, max-frames=%d, resume=%s)",
-        len(pairs), out_root, args.interval, args.max_frames, args.resume,
+        "Extract %d video(s) → %s (interval=%ss, frame_step=%d, max-frames=%d, resume=%s)",
+        len(pairs), out_root, args.interval, args.frame_step, args.max_frames, args.resume,
     )
 
     total = 0
@@ -382,6 +404,7 @@ def main() -> int:
                 out_dir=out_dir,
                 class_name=cls,
                 interval_s=args.interval,
+                frame_step=args.frame_step,
                 max_frames=args.max_frames,
                 quality=args.quality,
                 resume=args.resume,

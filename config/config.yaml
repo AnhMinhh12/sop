@@ -43,7 +43,7 @@ cameras:
     #rtsp_url: "shared/tools/data/raw/07_08.mp4"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
-    yolo_model: "shared/models/yolo/TFF4040_final.onnx"
+    yolo_model: "shared/models/yolo/TFF4040_FINAL2.onnx"
     resolution: [640, 480]
     fps_cap: 15
     conf_threshold: 0.35
