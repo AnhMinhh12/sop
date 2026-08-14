@@ -113,3 +113,69 @@ class BaseEngine(ABC):
             if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
                 return True
         return False
+
+    def _check_bbox_polygon_intersection(self, bbox: List[float], poly_pts: List[List[float]], 
+                                         centroid: List[float], w: int, h: int, 
+                                         centroid_only: bool = False) -> bool:
+        """
+        Kiểm tra xem bounding box của bàn tay có giao cắt (chạm) với vùng đa giác không.
+        Nếu centroid_only=True, chỉ kiểm tra centroid.
+        Ngược lại, kiểm tra:
+        1. Centroid trong đa giác.
+        2. Bất kỳ góc nào của bbox trong đa giác.
+        3. Bất kỳ đỉnh nào của đa giác trong bbox.
+        4. Bất kỳ cạnh nào của bbox giao cắt với cạnh của đa giác.
+        """
+        poly = np.array(poly_pts, np.float32)
+        
+        # 1. Check centroid
+        if cv2.pointPolygonTest(poly, (centroid[0], centroid[1]), False) >= 0:
+            return True
+        if centroid_only:
+            return False
+            
+        # Tọa độ bbox chuẩn hóa
+        xmin, ymin, xmax, ymax = bbox[0] / w, bbox[1] / h, bbox[2] / w, bbox[3] / h
+        corners = [
+            [xmin, ymin],
+            [xmax, ymin],
+            [xmax, ymax],
+            [xmin, ymax]
+        ]
+        
+        # 2. Check if any bbox corner is inside the polygon
+        for c in corners:
+            if cv2.pointPolygonTest(poly, (c[0], c[1]), False) >= 0:
+                return True
+                
+        # 3. Check if any polygon vertex is inside the bbox
+        for pt in poly_pts:
+            if xmin <= pt[0] <= xmax and ymin <= pt[1] <= ymax:
+                return True
+                
+        # 4. Check if any edge of the bbox intersects any edge of the polygon
+        def ccw(A, B, C):
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+            
+        def intersect(A, B, C, D):
+            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+            
+        bbox_edges = [
+            (corners[0], corners[1]),
+            (corners[1], corners[2]),
+            (corners[2], corners[3]),
+            (corners[3], corners[0])
+        ]
+        
+        n_poly = len(poly_pts)
+        poly_edges = []
+        for i in range(n_poly):
+            poly_edges.append((poly_pts[i], poly_pts[(i + 1) % n_poly]))
+            
+        for b_edge in bbox_edges:
+            for p_edge in poly_edges:
+                if intersect(b_edge[0], b_edge[1], p_edge[0], p_edge[1]):
+                    return True
+                    
+        return False
+

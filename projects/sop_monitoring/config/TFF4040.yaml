@@ -6,7 +6,7 @@ zones:
   # --- Tọa độ Camera thực tế ---
   mold: [[0.672, 0.739], [0.537, 0.522], [0.383, 0.7], [0.522, 0.989]]
   button_right: [[0.289, 0.764], [0.269, 0.714], [0.237, 0.742], [0.258, 0.797]]
-  middle_table: [[0.384, 0.478], [0.519, 0.372], [0.463, 0.292], [0.342, 0.392]]
+  middle_table: [[0.381, 0.564], [0.505, 0.444], [0.455, 0.364], [0.336, 0.464]]
   # Vùng tham chiếu để chọn 2 tay gần nhất (bao quanh mold + middle_table)
   work_area: [[0.198, 0.419], [0.497, 0.186], [0.858, 0.653], [0.436, 0.939]]
 # QUY TRÌNH SOP CHI TIẾT (5 BƯỚC MỚI)
@@ -32,13 +32,14 @@ steps:
     min_dwell_sec: 0.3
 
   # Bước 3: Lắp terminal vào slider
-  # 2 tay gần work_area nhất ở middle_table trong 2 giây
+  # Chỉ lấy 2 tay gần work_area nhất
   - step_order: 3
     step_name: "Lắp Terminal vào Slider"
-    logic: "stay_in_zone"
+    logic: "multi_trigger"
     required_zone: "middle_table"
     active_hand: "nearest_2"
-    min_duration_sec: 2.0
+    required_count: 2
+    min_dwell_sec: 2.0
 
   # Bước 4: Đưa 2 slider vào khuôn
   # Chỉ lấy 2 tay gần work_area nhất
@@ -47,7 +48,7 @@ steps:
     logic: "multi_trigger"
     required_zone: "mold"
     active_hand: "nearest_2"
-    required_count: 4
+    required_count: 2
     min_dwell_sec: 0.3
 
   # Bước 5: Bấm nút bên phải → hoàn thành 1 chu kì

@@ -102,24 +102,13 @@ class ProductEngine(BaseEngine):
             self._check_step_logic(step_1, now, update_status=True)
             
             active_zones_new = {"left": None, "right": None}
-            for hand in hands_data:
-                side = hand["label"].lower()
-                if side not in ["left", "right"]: continue
-                centroid = hand["centroid"]
-                bbox = hand["bbox"]
-                w, h = self.config.get("w", 640), self.config.get("h", 480)
-                test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
-                               [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-                
+            for side in ["left", "right"]:
                 current_zone = None
                 current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
                 for z_name in current_step_zones:
-                    z_pts = self.zones.get(z_name)
-                    if z_pts:
-                        poly = np.array(z_pts, np.float32)
-                        if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                            current_zone = z_name
-                            break
+                    if self._is_in_zone(side, z_name):
+                        current_zone = z_name
+                        break
                 active_zones_new[side] = current_zone
                 self.hand_states[side]["zone"] = current_zone
                 self.hand_states[side]["entry_time"] = now
@@ -177,24 +166,13 @@ class ProductEngine(BaseEngine):
                     self._check_step_logic(step_1, now, update_status=True)
                     
                     active_zones_new = {"left": None, "right": None}
-                    for hand in hands_data:
-                        side = hand["label"].lower()
-                        if side not in ["left", "right"]: continue
-                        centroid = hand["centroid"]
-                        bbox = hand["bbox"]
-                        w, h = self.config.get("w", 640), self.config.get("h", 480)
-                        test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
-                                       [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-                        
+                    for side in ["left", "right"]:
                         current_zone = None
                         current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
                         for z_name in current_step_zones:
-                            z_pts = self.zones.get(z_name)
-                            if z_pts:
-                                poly = np.array(z_pts, np.float32)
-                                if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                                    current_zone = z_name
-                                    break
+                            if self._is_in_zone(side, z_name):
+                                current_zone = z_name
+                                break
                         active_zones_new[side] = current_zone
                         self.hand_states[side]["zone"] = current_zone
                         self.hand_states[side]["entry_time"] = now
@@ -221,50 +199,31 @@ class ProductEngine(BaseEngine):
         
         # 1. Cập nhật vị trí
         active_zones = {"left": None, "right": None}
-        for hand in hands_data:
-            side = hand["label"].lower()
-            if side not in ["left", "right"]: continue
-            
-            centroid = hand["centroid"]
-            bbox = hand["bbox"]
-            w, h = self.config.get("w", 640), self.config.get("h", 480)
-            
-            test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
-                           [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-            
+        for side in ["left", "right"]:
             current_zone = None
             
             # Kiểm tra vùng của bước hiện tại trước (ưu tiên)
             current_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx]) if self.current_step_idx < len(self.sop_steps) else []
             for z_name in current_step_zones:
-                z_pts = self.zones.get(z_name)
-                if z_pts:
-                    poly = np.array(z_pts, np.float32)
-                    if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                        current_zone = z_name
-                        break
+                if self._is_in_zone(side, z_name):
+                    current_zone = z_name
+                    break
 
             # Kiểm tra vùng của bước tiếp theo
             if not current_zone and self.current_step_idx + 1 < len(self.sop_steps):
                 next_step_zones = self._get_all_zones_for_step(self.sop_steps[self.current_step_idx + 1])
                 for z_name in next_step_zones:
-                    z_pts = self.zones.get(z_name)
-                    if z_pts:
-                        poly = np.array(z_pts, np.float32)
-                        if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                            current_zone = z_name
-                            break
+                    if self._is_in_zone(side, z_name):
+                        current_zone = z_name
+                        break
 
             # Kiểm tra vùng bước 1 (để bắt lỗi quay lại)
             if not current_zone and self.current_step_idx > 0:
                 step_1_zones = self._get_all_zones_for_step(self.sop_steps[0])
                 for z_name in step_1_zones:
-                    z_pts = self.zones.get(z_name)
-                    if z_pts:
-                        poly = np.array(z_pts, np.float32)
-                        if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
-                            current_zone = z_name
-                            break
+                    if self._is_in_zone(side, z_name):
+                        current_zone = z_name
+                        break
             
             active_zones[side] = current_zone
             if current_zone != self.hand_states[side]["zone"]:
@@ -772,10 +731,9 @@ class ProductEngine(BaseEngine):
         zone_pts = self.zones.get(zone_name)
         if not zone_pts: return False
         
-        poly = np.array(zone_pts, np.float32)
-        
         # Cơ chế Shrink: Thu nhỏ đa giác để kiểm tra vi phạm khắt khe hơn
         if shrink_factor > 0:
+            poly = np.array(zone_pts, np.float32)
             M = cv2.moments(poly)
             if M["m00"] != 0:
                 cx = M["m10"] / M["m00"]
@@ -786,17 +744,13 @@ class ProductEngine(BaseEngine):
                     px = pt[0] + (cx - pt[0]) * shrink_factor
                     py = pt[1] + (cy - pt[1]) * shrink_factor
                     shrunk_poly.append([px, py])
-                poly = np.array(shrunk_poly, np.float32)
+                zone_pts = shrunk_poly
 
         w, h = self.config.get("w", 640), self.config.get("h", 480)
         for hand in self.last_hands:
             if hand["label"].lower() != side: continue
-            centroid = hand["centroid"]
-            if centroid_only: test_points = [centroid]
-            else:
-                bbox = hand["bbox"]
-                test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points): return True
+            if self._check_bbox_polygon_intersection(hand["bbox"], zone_pts, hand["centroid"], w, h, centroid_only):
+                return True
         return False
 
     def _get_all_zones_for_step(self, step: Dict) -> List[str]:

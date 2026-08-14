@@ -61,19 +61,9 @@ class ProductEngine(BaseEngine):
 
         # Update active_zones for bimanual status
         active_zones = {"left": None, "right": None}
-        for hand in hands_data:
-            side = hand["label"].lower()
-            if side not in ["left", "right"]: continue
-            
-            centroid = hand["centroid"]
-            bbox = hand["bbox"]
-            w, h = self.config.get("w", 640), self.config.get("h", 480)
-            test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], 
-                           [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-            
-            for z_name, z_pts in self.zones.items():
-                poly = np.array(z_pts, np.float32)
-                if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
+        for side in ["left", "right"]:
+            for z_name in self.zones.keys():
+                if self._is_in_zone(side, z_name):
                     active_zones[side] = z_name
                     break
 
@@ -498,16 +488,11 @@ class ProductEngine(BaseEngine):
         zone_pts = self.zones.get(zone_name)
         if not zone_pts: return False
         
-        poly = np.array(zone_pts, np.float32)
         w, h = self.config.get("w", 640), self.config.get("h", 480)
         for hand in self.last_hands:
             if hand["label"].lower() != side: continue
-            centroid = hand["centroid"]
-            if centroid_only: test_points = [centroid]
-            else:
-                bbox = hand["bbox"]
-                test_points = [centroid, [bbox[0]/w, bbox[1]/h], [bbox[2]/w, bbox[1]/h], [bbox[0]/w, bbox[3]/h], [bbox[2]/w, bbox[3]/h]]
-            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points): return True
+            if self._check_bbox_polygon_intersection(hand["bbox"], zone_pts, hand["centroid"], w, h, centroid_only):
+                return True
         return False
 
     def _get_all_zones_for_step(self, step: Dict) -> List[str]:
