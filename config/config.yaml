@@ -19,6 +19,9 @@ products:
   - id: "laprap"
     name: "laprap"
     sop_file: "projects/sop_monitoring/config/laprap.yaml"
+  - id: "TNA2269"
+    name: "TNA2269"
+    sop_file: "projects/sop_monitoring/config/TNA2269.yaml"
 
 inference:
   device: "cpu"
@@ -35,6 +38,19 @@ models:
     iou_threshold: 0.4516
 
 cameras:
+  - id: "machine_06"
+    name: "Máy 6"
+    illustration: "/static/illustration/may_6.png"
+    rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.233:554/Streaming/Channels/102"
+    sop_file: "projects/sop_monitoring/config/TNA2269.yaml"
+    engine_id: "TNA2269"
+    allowed_products:
+      - "TNA2269"
+    yolo_model: "shared/models/yolo/TNA2269.onnx"
+    resolution: [640, 480]
+    fps_cap: 15
+    conf_threshold: 0.35
+
   - id: "machine_07"
     name: "Máy 7"
     illustration: "/static/illustration/may_7.png"
@@ -43,6 +59,9 @@ cameras:
     #rtsp_url: "shared/tools/data/raw/07_08.mp4"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
+    allowed_products:
+      - "TFF4040"
+      - "626287"
     yolo_model: "shared/models/yolo/TFF4040_FINAL2.onnx"
     resolution: [640, 480]
     fps_cap: 15
@@ -54,6 +73,8 @@ cameras:
     rtsp_url: "rtsp://admin:Htmp%402019@192.168.103.18:554/Streaming/Channels/101"
     sop_file: "projects/sop_monitoring/config/laprap.yaml"
     engine_id: "laprap"
+    allowed_products:
+      - "laprap"
     yolo_model: "" # Không chạy AI cục bộ tại Hub
     resolution: [640, 480]
     fps_cap: 15

@@ -243,65 +243,35 @@ def get_events():
 
 @app.route('/api/station/<camera_id>/products')
 def get_station_products(camera_id):
-    def map_raw_to_clean_product(raw_name: str) -> str:
-        if not raw_name:
-            return None
-        raw_name_lower = raw_name.lower()
-        if "626287" in raw_name_lower:
-            return "626287"
-        if any(k in raw_name_lower for k in ["tff4040", "reformed", "test model", "sản phẩm a"]):
-            return "TFF4040"
-        if "laprap" in raw_name_lower:
-            return "laprap"
-        return None
-
     try:
-        products = []
-        if camera_id and camera_id not in ["all", "undefined", "null"]:
-            products = CameraQueries.get_products_by_camera(camera_id)
-        
-        # If camera_id is "all" or the query returned no records, load all definitions from DB
-        if not products:
-            conn = db.get_connection()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT DISTINCT id, name FROM sop_definitions ORDER BY name")
-                    products = cursor.fetchall()
-                    cursor.close()
-                except Exception as db_err:
-                    logger.warning(f"Failed to query all products from DB: {db_err}")
-                finally:
-                    conn.close()
-            
         config = ConfigLoader.load_config()
         products_cfg = config.get("products", [])
 
-        # If we got products from DB, map them to clean IDs
-        clean_ids = set()
-        if camera_id == "machine_07":
-            clean_ids = {"TFF4040", "626287"}
-        elif camera_id == "machine_08":
-            clean_ids = {"laprap"}
-        else:
-            for p in products:
-                name = p.get("name", "")
-                clean_id = map_raw_to_clean_product(name)
-                if clean_id:
-                    clean_ids.add(clean_id)
+        # Direct machine mapping as fallback
+        static_machine_map = {
+            "machine_06": ["TNA2269"],
+            "machine_07": ["TFF4040", "626287"],
+            "machine_08": ["laprap"]
+        }
 
-        # Build response list matching config.yaml definitions
-        res = []
-        for p in products_cfg:
-            p_id = p.get("id")
-            if p_id in clean_ids:
-                res.append({"id": p_id, "name": p.get("name")})
+        # If camera_id is "all", empty, or undefined -> return all products
+        if not camera_id or camera_id in ["all", "undefined", "null"]:
+            return jsonify([{"id": p.get("id"), "name": p.get("name")} for p in products_cfg])
 
-        # Fallback to all config products if no match found
-        if not res:
-            res = [{"id": p.get("id"), "name": p.get("name")} for p in products_cfg]
+        camera = next((c for c in config.get("cameras", []) if c.get("id") == camera_id), None)
+        allowed_ids = None
 
-        return jsonify(res)
+        if camera and "allowed_products" in camera:
+            allowed_ids = set(camera.get("allowed_products", []))
+        elif camera_id in static_machine_map:
+            allowed_ids = set(static_machine_map[camera_id])
+
+        if allowed_ids:
+            res = [p for p in products_cfg if p.get("id") in allowed_ids]
+            return jsonify([{"id": p.get("id"), "name": p.get("name")} for p in res])
+
+        # Fallback to all products if machine is unknown
+        return jsonify([{"id": p.get("id"), "name": p.get("name")} for p in products_cfg])
     except Exception as e:
         logger.error(f"Error in get_station_products: {e}")
         return jsonify([])

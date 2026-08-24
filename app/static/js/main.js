@@ -96,7 +96,7 @@ async function loadProducts(stationId = '', selectElementId = 'filter-product') 
         products.forEach(prod => {
             const opt = document.createElement('option');
             const cleanName = prod.name.replace(' (Auto)', '');
-            opt.value = cleanName;
+            opt.value = prod.id || cleanName;
             opt.textContent = cleanName;
             select.appendChild(opt);
         });
@@ -551,7 +551,7 @@ async function initProductSelector(cameraId, currentProductId) {
     if (!select) return;
 
     try {
-        const response = await fetch('/api/products');
+        const response = await fetch(`/api/station/${cameraId}/products`);
         const products = await response.json();
         
         select.innerHTML = '';
@@ -778,7 +778,11 @@ socket.on('step_update', (data) => {
             // Xóa hết trạng thái cũ
             el.classList.remove('active', 'completed');
             
-            if (idx < step_index) {
+            const isCompleted = (data.step_states && Array.isArray(data.step_states)) 
+                ? !!data.step_states[idx] 
+                : (idx < step_index);
+
+            if (isCompleted) {
                 // Các bước đã hoàn thành
                 el.classList.add('completed');
                 if (statusIcon) {
