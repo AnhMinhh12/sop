@@ -348,6 +348,98 @@ def get_violation_stats():
     return jsonify(counts)
 
 
+@app.route('/api/stats/export_excel')
+def export_stats_excel():
+    """Xuất file Excel (CSV UTF-8 BOM) cho trang thống kê, không bao gồm cột video."""
+    import io
+    import csv
+
+    target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
+    camera_id = request.args.get('camera_id')
+    product_id = request.args.get('product_id')
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+
+    events = EventQueries.get_export_events(
+        target_date=target_date,
+        camera_id=camera_id,
+        product_id=product_id,
+        start_hour=start_hour,
+        end_hour=end_hour
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Tiêu đề cột - CHỈ THỐNG KÊ LỖI, KHÔNG CÓ CỘT VIDEO
+    writer.writerow([
+        'STT', 
+        'Ngày', 
+        'Giờ', 
+        'Mã trạm', 
+        'Mã sản phẩm / SOP', 
+        'Loại vi phạm', 
+        'Bước dự kiến', 
+        'Thời lượng (giây)'
+    ])
+
+    cat_map = {
+        'timeout': 'Lỗi quá giờ',
+        'idle_timeout': 'Lỗi quá giờ chờ',
+        'skip_step': 'Lỗi bỏ bước',
+        'wrong_sequence': 'Lỗi sai thứ tự',
+        'wrong_hand': 'Lỗi sai tay thao tác',
+        'wrong_position': 'Lỗi vị trí linh kiện'
+    }
+
+    row_index = 1
+    for ev in events:
+        v_type = ev.get('violation_type', '')
+        sop_status = ev.get('sop_status', '')
+        if sop_status == 'completed' or v_type == 'success':
+            continue
+
+        ts = str(ev.get('timestamp', ''))
+        date_str = ts.split(' ')[0] if ' ' in ts else ts
+        time_str = ts.split(' ')[1] if ' ' in ts else ''
+
+        status_vn = cat_map.get(v_type, 'Sai thao tác')
+
+        dur = ev.get('duration')
+        if dur is None or dur == '':
+            dur = ev.get('clip_duration')
+        if dur is None or dur == '':
+            dur = '-'
+        else:
+            try:
+                dur_float = float(dur)
+                dur = int(dur_float) if dur_float.is_integer() else round(dur_float, 1)
+            except:
+                pass
+
+        writer.writerow([
+            row_index,
+            date_str,
+            time_str,
+            ev.get('station_id') or (f"Trạm {ev.get('camera_id')}" if ev.get('camera_id') else '-'),
+            ev.get('definition_name') or ev.get('product_id') or '-',
+            status_vn,
+            ev.get('expected_step') or '-',
+            dur
+        ])
+        row_index += 1
+
+    # Mã hóa utf-8-sig để Excel mở trực tiếp không bị lỗi tiếng Việt
+    csv_bytes = output.getvalue().encode('utf-8-sig')
+    filename = f"Thong_Ke_Hieu_Suat_{target_date}.csv"
+
+    return Response(
+        csv_bytes,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @app.route('/api/system/health')
 def get_health():
     stats = DiskMonitor.get_system_stats()

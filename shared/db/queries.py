@@ -540,6 +540,62 @@ class EventQueries:
             cursor.close()
             conn.close()
 
+    @staticmethod
+    def get_export_events(target_date: str,
+                          camera_id: Optional[str] = None,
+                          product_id: Optional[str] = None,
+                          start_hour: Optional[int] = None,
+                          end_hour: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Truy vấn tất cả sự kiện để xuất dữ liệu ra file Excel.
+        """
+        conn = db.get_connection()
+        if conn is None: return []
+        cursor = conn.cursor()
+        try:
+            where_clauses = ["e.sop_status = 'violation'", "DATE(e.timestamp) = %s"]
+            params = [target_date]
+
+            if camera_id and camera_id != "":
+                where_clauses.append("c.station_id = %s")
+                params.append(camera_id)
+            if product_id and product_id != "":
+                if product_id == "TFF4040":
+                    where_clauses.append("(d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)")
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clauses.append("(d.name LIKE %s)")
+                    params.append("%626287%")
+                else:
+                    where_clauses.append("(d.name LIKE %s OR d.name = %s)")
+                    params.extend([f"%{product_id}%", product_id])
+
+            if start_hour is not None and start_hour != "":
+                where_clauses.append("HOUR(e.timestamp) >= %s")
+                params.append(int(start_hour))
+            if end_hour is not None and end_hour != "":
+                where_clauses.append("HOUR(e.timestamp) <= %s")
+                params.append(int(end_hour))
+
+            where_str = " WHERE " + " AND ".join(where_clauses)
+            query = f"""
+                SELECT e.*, c.station_id, d.name as definition_name, cl.duration_sec as clip_duration
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
+                LEFT JOIN sop_clips cl ON cl.event_id = e.id
+                {where_str}
+                ORDER BY e.timestamp DESC
+            """
+            cursor.execute(query, tuple(params))
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"DB Error getting export events: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class CameraQueries:
     """

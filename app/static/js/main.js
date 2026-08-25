@@ -185,7 +185,7 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
     const list = document.getElementById('history-list');
     const paginationContainer = document.getElementById('pagination');
     if (!list) return;
-    list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
+    list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
 
     let url = `/api/events?page=${page}&limit=${historyItemsPerPage}&days=15`;
     if (stationId) url += `&camera_id=${stationId}`;
@@ -203,7 +203,7 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
         list.innerHTML = '';
 
         if (events.length === 0) {
-            list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào (15 ngày qua)</td></tr>';
+            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào (15 ngày qua)</td></tr>';
             if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
@@ -216,6 +216,19 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
                 vTypeVN = 'Quá giờ';
             } else {
                 vTypeVN = 'Sai thao tác';
+            }
+
+            // Tách timestamp thành Ngày và Giờ riêng biệt
+            let dateStr = ev.timestamp || '';
+            let timeStr = '-';
+            if (dateStr.includes(' ')) {
+                const parts = dateStr.split(' ');
+                dateStr = parts[0];
+                timeStr = parts.slice(1).join(' ');
+            } else if (dateStr.includes('T')) {
+                const parts = dateStr.split('T');
+                dateStr = parts[0];
+                timeStr = parts[1] ? parts[1].split('.')[0] : '';
             }
 
             // Tính thời gian vi phạm (s)
@@ -232,7 +245,8 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
             row.className = 'event-row';
             if (!isViolation) row.style.opacity = '0.8';
             row.innerHTML = `
-                <td>${ev.timestamp}</td>
+                <td>${dateStr}</td>
+                <td><span class="font-mono font-semibold text-slate-700">${timeStr}</span></td>
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
                 <td><span class="event-type ${isViolation ? 'text-danger' : 'text-secondary'}">${vTypeVN}</span></td>
                 <td>${ev.expected_step || '-'}</td>
@@ -249,7 +263,7 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
 
     } catch (err) { 
         console.error(err); 
-        list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu</td></tr>'; 
+        list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu</td></tr>'; 
     }
 }
 
@@ -377,6 +391,28 @@ async function initStatsPage(selectedId = "") {
     if (productSelect) productSelect.onchange = triggerRefresh;
     if (startHourSelect) startHourSelect.onchange = triggerRefresh;
     if (endHourSelect) endHourSelect.onchange = triggerRefresh;
+}
+
+function exportStatsExcel() {
+    const stationSelect = document.getElementById('filter-station');
+    const productSelect = document.getElementById('filter-product');
+    const dateInput = document.getElementById('target-date');
+    const startHourSelect = document.getElementById('filter-start-hour');
+    const endHourSelect = document.getElementById('filter-end-hour');
+
+    const dateVal = dateInput ? dateInput.value : "";
+    const stationVal = stationSelect ? stationSelect.value : "";
+    const productVal = productSelect ? productSelect.value : "";
+    const startH = startHourSelect ? startHourSelect.value : "";
+    const endH = endHourSelect ? endHourSelect.value : "";
+
+    let url = `/api/stats/export_excel?date=${dateVal}`;
+    if (stationVal) url += `&camera_id=${stationVal}`;
+    if (productVal) url += `&product_id=${productVal}`;
+    if (startH !== "" && startH !== null && startH !== undefined) url += `&start_hour=${startH}`;
+    if (endH !== "" && endH !== null && endH !== undefined) url += `&end_hour=${endH}`;
+
+    window.location.href = url;
 }
 
 async function loadStats(date, cameraId = "", productId = "", startHour = "", endHour = "") {
