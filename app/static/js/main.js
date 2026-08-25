@@ -7,6 +7,7 @@ const socket = window.socket;
 // Store for chart and data
 let violationChart = null;
 let healthInterval = null;
+let statsInterval = null;
 let pieChart = null;
 let lineChart = null;
 let hourlyChart = null;
@@ -29,6 +30,15 @@ async function initDashboard() {
         clearInterval(healthInterval);
         healthInterval = null;
     }
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+
+    // Reset chart instances khi chuyển trang hoặc re-init
+    if (pieChart) { try { pieChart.destroy(); } catch(e) {} pieChart = null; }
+    if (lineChart) { try { lineChart.destroy(); } catch(e) {} lineChart = null; }
+    if (hourlyChart) { try { hourlyChart.destroy(); } catch(e) {} hourlyChart = null; }
 
     const grid = document.getElementById('camera-grid');
     const stationContainer = document.getElementById('station-container');
@@ -105,9 +115,13 @@ async function loadProducts(stationId = '', selectElementId = 'filter-product') 
     }
 }
 
+let currentHistoryPage = 1;
+const historyItemsPerPage = 50;
+
 async function initHistoryPage(selectedId = "") {
     const stationSelect = document.getElementById('filter-station');
     const productSelect = document.getElementById('filter-product');
+    const hourSelect = document.getElementById('filter-hour');
     const dateInput = document.getElementById('filter-date');
 
     if (stationSelect && stationSelect.options.length <= 1) {
@@ -126,18 +140,24 @@ async function initHistoryPage(selectedId = "") {
     // Load products dropdown on init
     await loadProducts(selectedId, 'filter-product');
 
-    loadHistory(selectedId, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
+    loadHistory(selectedId, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
 
     if (stationSelect) {
         stationSelect.onchange = async () => {
             await loadProducts(stationSelect.value, 'filter-product');
-            loadHistory(stationSelect.value, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
+            loadHistory(stationSelect.value, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
         };
     }
 
     if (productSelect) {
         productSelect.onchange = () => {
-            loadHistory(stationSelect ? stationSelect.value : "", productSelect.value, dateInput ? dateInput.value : "");
+            loadHistory(stationSelect ? stationSelect.value : "", productSelect.value, dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
+        };
+    }
+
+    if (hourSelect) {
+        hourSelect.onchange = () => {
+            loadHistory(stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect.value, 1);
         };
     }
 
@@ -145,7 +165,7 @@ async function initHistoryPage(selectedId = "") {
     const searchBtn = document.querySelector('.btn-primary');
     if (searchBtn) {
         searchBtn.onclick = () => {
-            loadHistory(stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "", dateInput ? dateInput.value : "");
+            loadHistory(stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
         };
     }
 }
@@ -153,29 +173,38 @@ async function initHistoryPage(selectedId = "") {
 function applyFilters() {
     const stationSelect = document.getElementById('filter-station');
     const productSelect = document.getElementById('filter-product');
+    const hourSelect = document.getElementById('filter-hour');
     const dateInput = document.getElementById('filter-date');
     if (stationSelect && productSelect && dateInput) {
-        loadHistory(stationSelect.value, productSelect.value, dateInput.value);
+        loadHistory(stationSelect.value, productSelect.value, dateInput.value, hourSelect ? hourSelect.value : "", 1);
     }
 }
 
-async function loadHistory(stationId = '', productId = '', date = '') {
+async function loadHistory(stationId = '', productId = '', date = '', hour = '', page = 1) {
+    currentHistoryPage = page;
     const list = document.getElementById('history-list');
+    const paginationContainer = document.getElementById('pagination');
     if (!list) return;
-    list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
+    list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
 
-    let url = `/api/events?limit=100`;
+    let url = `/api/events?page=${page}&limit=${historyItemsPerPage}&days=15`;
     if (stationId) url += `&camera_id=${stationId}`;
     if (productId) url += `&product_id=${productId}`;
     if (date) url += `&date=${date}`;
+    if (hour !== "" && hour !== null && hour !== undefined) url += `&hour=${hour}`;
 
     try {
         const response = await fetch(url);
-        const events = await response.json();
+        const data = await response.json();
+        const events = Array.isArray(data) ? data : (data.events || []);
+        const total = data.total !== undefined ? data.total : events.length;
+        const totalPages = data.total_pages !== undefined ? data.total_pages : 1;
+
         list.innerHTML = '';
 
         if (events.length === 0) {
-            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào</td></tr>';
+            list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào (15 ngày qua)</td></tr>';
+            if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
 
@@ -188,6 +217,16 @@ async function loadHistory(stationId = '', productId = '', date = '') {
             } else {
                 vTypeVN = 'Sai thao tác';
             }
+
+            // Tính thời gian vi phạm (s)
+            let durationStr = '-';
+            if (ev.duration !== null && ev.duration !== undefined && ev.duration !== '') {
+                const durNum = parseFloat(ev.duration);
+                durationStr = isNaN(durNum) ? ev.duration + 's' : (Number.isInteger(durNum) ? durNum + 's' : durNum.toFixed(1) + 's');
+            } else if (ev.clip_duration !== null && ev.clip_duration !== undefined && ev.clip_duration !== '') {
+                durationStr = ev.clip_duration + 's';
+            }
+
             const isViolation = ev.sop_status === 'violation';
             const row = document.createElement('tr');
             row.className = 'event-row';
@@ -197,13 +236,90 @@ async function loadHistory(stationId = '', productId = '', date = '') {
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
                 <td><span class="event-type ${isViolation ? 'text-danger' : 'text-secondary'}">${vTypeVN}</span></td>
                 <td>${ev.expected_step || '-'}</td>
+                <td><span class="font-mono text-slate-700 font-semibold">${durationStr}</span></td>
                 <td>
                     ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
                 </td>
             `;
             list.appendChild(row);
         });
-    } catch (err) { console.error(err); list.innerHTML = 'Lỗi nạp dữ liệu'; }
+
+        // Vẽ bộ chuyển trang
+        renderPagination(paginationContainer, page, totalPages, total);
+
+    } catch (err) { 
+        console.error(err); 
+        list.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu</td></tr>'; 
+    }
+}
+
+function renderPagination(container, currentPage, totalPages, totalCount) {
+    if (!container) return;
+    if (totalPages <= 1 && totalCount <= historyItemsPerPage) {
+        container.innerHTML = `
+            <div class="pagination-container">
+                <div class="pagination-info">Hiển thị <strong>${totalCount}</strong> bản ghi (15 ngày qua)</div>
+                <div></div>
+            </div>
+        `;
+        return;
+    }
+
+    const startItem = (currentPage - 1) * historyItemsPerPage + 1;
+    const endItem = Math.min(currentPage * historyItemsPerPage, totalCount);
+
+    let pageButtonsHtml = '';
+
+    // Nút Trang trước
+    pageButtonsHtml += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changeHistoryPage(${currentPage - 1})">❮ Trang trước</button>`;
+
+    // Hiển thị các số trang
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    if (startPage > 1) {
+        pageButtonsHtml += `<button class="page-btn" onclick="changeHistoryPage(1)">1</button>`;
+        if (startPage > 2) pageButtonsHtml += `<span style="padding: 0 6px; color: #94a3b8; font-weight: bold;">...</span>`;
+    }
+
+    for (let p = startPage; p <= endPage; p++) {
+        pageButtonsHtml += `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="changeHistoryPage(${p})">${p}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pageButtonsHtml += `<span style="padding: 0 6px; color: #94a3b8; font-weight: bold;">...</span>`;
+        pageButtonsHtml += `<button class="page-btn" onclick="changeHistoryPage(${totalPages})">${totalPages}</button>`;
+    }
+
+    // Nút Trang sau
+    pageButtonsHtml += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changeHistoryPage(${currentPage + 1})">Trang sau ❯</button>`;
+
+    container.innerHTML = `
+        <div class="pagination-container">
+            <div class="pagination-info">Hiển thị <strong>${startItem}-${endItem}</strong> trong tổng số <strong>${totalCount}</strong> bản ghi (15 ngày qua)</div>
+            <div class="pagination-controls">${pageButtonsHtml}</div>
+        </div>
+    `;
+}
+
+function changeHistoryPage(newPage) {
+    const stationSelect = document.getElementById('filter-station');
+    const productSelect = document.getElementById('filter-product');
+    const hourSelect = document.getElementById('filter-hour');
+    const dateInput = document.getElementById('filter-date');
+
+    const stationId = stationSelect ? stationSelect.value : "";
+    const productId = productSelect ? productSelect.value : "";
+    const date = dateInput ? dateInput.value : "";
+    const hour = hourSelect ? hourSelect.value : "";
+
+    loadHistory(stationId, productId, date, hour, newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /* --- LOGIC TRANG THỐNG KÊ --- */
@@ -211,6 +327,8 @@ async function initStatsPage(selectedId = "") {
     const stationSelect = document.getElementById('filter-station');
     const productSelect = document.getElementById('filter-product');
     const dateInput = document.getElementById('target-date');
+    const startHourSelect = document.getElementById('filter-start-hour');
+    const endHourSelect = document.getElementById('filter-end-hour');
     if (!dateInput) return;
 
     const d = new Date();
@@ -234,23 +352,34 @@ async function initStatsPage(selectedId = "") {
     // Load products dropdown on init
     await loadProducts(selectedId, 'filter-product');
 
-    loadStats(today, selectedId, productSelect ? productSelect.value : "");
+    const triggerRefresh = () => {
+        const dateVal = dateInput.value;
+        const stationVal = stationSelect ? stationSelect.value : "";
+        const productVal = productSelect ? productSelect.value : "";
+        const startH = startHourSelect ? startHourSelect.value : "";
+        const endH = endHourSelect ? endHourSelect.value : "";
+        loadStats(dateVal, stationVal, productVal, startH, endH);
+    };
 
-    dateInput.onchange = () => loadStats(dateInput.value, stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "");
+    triggerRefresh();
+
+    // 5 phút cập nhật biểu đồ 1 lần (300,000 ms) để tránh giật/nháy màn hình
+    if (statsInterval) clearInterval(statsInterval);
+    statsInterval = setInterval(triggerRefresh, 300000);
+
+    dateInput.onchange = triggerRefresh;
     if (stationSelect) {
         stationSelect.onchange = async () => {
             await loadProducts(stationSelect.value, 'filter-product');
-            loadStats(dateInput.value, stationSelect.value, productSelect ? productSelect.value : "");
+            triggerRefresh();
         };
     }
-    if (productSelect) {
-        productSelect.onchange = () => {
-            loadStats(dateInput.value, stationSelect ? stationSelect.value : "", productSelect.value);
-        };
-    }
+    if (productSelect) productSelect.onchange = triggerRefresh;
+    if (startHourSelect) startHourSelect.onchange = triggerRefresh;
+    if (endHourSelect) endHourSelect.onchange = triggerRefresh;
 }
 
-async function loadStats(date, cameraId = "", productId = "") {
+async function loadStats(date, cameraId = "", productId = "", startHour = "", endHour = "") {
     try {
         // Clean up inputs
         if (cameraId === "undefined" || cameraId === "null") cameraId = "";
@@ -259,6 +388,8 @@ async function loadStats(date, cameraId = "", productId = "") {
         let filter = `date=${date}`;
         if (cameraId) filter += `&camera_id=${cameraId}`;
         if (productId) filter += `&product_id=${productId}`;
+        if (startHour !== "" && startHour !== null && startHour !== undefined) filter += `&start_hour=${startHour}`;
+        if (endHour !== "" && endHour !== null && endHour !== undefined) filter += `&end_hour=${endHour}`;
 
         // 1. Summary
         const summaryRes = await fetch(`/api/stats/summary?${filter}`);
@@ -267,17 +398,17 @@ async function loadStats(date, cameraId = "", productId = "") {
         document.getElementById('total-completions').innerText = `${summary.total_completions * 2}/4540`;
         document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
 
-        // 2. Pie Chart
+        // 2. Pie Chart (Biểu đồ tròn chi tiết loại lỗi)
         const distRes = await fetch(`/api/stats/distribution?${filter}`);
         const distData = await distRes.json();
         renderPieChart(distData);
 
-        // 3. Line Chart
+        // 3. Line/Area Chart (Biểu đồ miền xu hướng tuần)
         const trendRes = await fetch(`/api/stats/trend?${filter}`);
         const trendData = await trendRes.json();
         renderLineChart(trendData);
 
-        // 4. Hourly Chart
+        // 4. Hourly Area Chart (Biểu đồ miền diễn biến theo thời gian)
         const hourlyRes = await fetch(`/api/stats/hourly?${filter}`);
         const hourlyData = await hourlyRes.json();
         renderHourlyChart(hourlyData);
@@ -285,73 +416,131 @@ async function loadStats(date, cameraId = "", productId = "") {
 }
 
 function renderPieChart(data) {
-    const ctx = document.getElementById('violationPieChart').getContext('2d');
-    if (pieChart) pieChart.destroy();
+    const canvas = document.getElementById('violationPieChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     
-    let saiThaoTac = 0;
-    let quaGio = 0;
+    if (pieChart) { try { pieChart.destroy(); } catch(e) {} pieChart = null; }
     
-    Object.keys(data).forEach(key => {
-        const val = data[key];
-        if (key === 'timeout' || key === 'idle_timeout') {
-            quaGio += val;
-        } else if (key !== 'success') {
-            saiThaoTac += val;
-        }
-    });
-    
+    const catMap = {
+        'timeout': { name: 'Lỗi quá giờ', color: '#f59e0b' },
+        'idle_timeout': { name: 'Lỗi quá giờ chờ', color: '#fbbf24' },
+        'skip_step': { name: 'Lỗi bỏ bước', color: '#ef4444' },
+        'wrong_sequence': { name: 'Lỗi sai thứ tự', color: '#dc2626' },
+        'wrong_hand': { name: 'Lỗi sai tay thao tác', color: '#8b5cf6' },
+        'wrong_position': { name: 'Lỗi vị trí linh kiện', color: '#ec4899' },
+    };
+
     const labels = [];
     const values = [];
     const colors = [];
+    let otherCount = 0;
     
-    if (saiThaoTac > 0) {
-        labels.push('Sai thao tác');
-        values.push(saiThaoTac);
-        colors.push('#ef4444');
+    Object.keys(data).forEach(key => {
+        const val = data[key];
+        if (key === 'success' || val <= 0) return;
+        
+        if (catMap[key]) {
+            labels.push(catMap[key].name);
+            values.push(val);
+            colors.push(catMap[key].color);
+        } else {
+            otherCount += val;
+        }
+    });
+
+    if (otherCount > 0) {
+        labels.push('Sai thao tác khác');
+        values.push(otherCount);
+        colors.push('#3b82f6');
     }
-    if (quaGio > 0) {
-        labels.push('Quá giờ');
-        values.push(quaGio);
-        colors.push('#f59e0b');
+
+    if (labels.length === 0) {
+        labels.push('Không có lỗi');
+        values.push(1);
+        colors.push('#e2e8f0');
     }
-    
+
     pieChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: labels,
-            datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }]
+            datasets: [{ 
+                data: values, 
+                backgroundColor: colors, 
+                borderWidth: 2,
+                borderColor: '#ffffff'
+            }]
         },
-        options: { responsive: true, plugins: { legend: { position: 'bottom' } }, cutout: '70%' }
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { 
+                legend: { 
+                    position: 'bottom',
+                    labels: { boxWidth: 12, padding: 15, font: { size: 12, weight: '600' } }
+                } 
+            }, 
+            cutout: '68%' 
+        }
     });
 }
 
 function renderLineChart(data) {
-    const ctx = document.getElementById('violationLineChart').getContext('2d');
-    if (lineChart) lineChart.destroy();
+    const canvas = document.getElementById('violationLineChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    if (lineChart) { try { lineChart.destroy(); } catch(e) {} lineChart = null; }
     
     const labels = data.map(d => d.day);
     const values = data.map(d => d.count);
+
+    // Dynamic gradient fill for Area Chart (Biểu đồ miền)
+    const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, 'rgba(45, 92, 247, 0.35)');
+    gradient.addColorStop(1, 'rgba(45, 92, 247, 0.01)');
 
     lineChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
             datasets: [{ 
-                label: 'Số lỗi', 
+                label: 'Số lỗi vi phạm', 
                 data: values, 
                 borderColor: '#2d5cf7', 
-                backgroundColor: 'rgba(45, 92, 247, 0.1)', 
-                fill: true, 
+                borderWidth: 3,
+                backgroundColor: gradient, 
+                fill: 'start', 
                 tension: 0.4,
-                pointRadius: 4,
-                pointBackgroundColor: '#2d5cf7'
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: '#2d5cf7',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2
             }]
         },
         options: { 
             responsive: true, 
-            plugins: { legend: { display: false } }, 
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    padding: 10,
+                    cornerRadius: 8
+                }
+            }, 
             scales: { 
-                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                y: { 
+                    beginAtZero: true, 
+                    ticks: { 
+                        stepSize: 200,
+                        precision: 0 
+                    } 
+                },
                 x: { grid: { display: false } }
             } 
         }
@@ -359,18 +548,30 @@ function renderLineChart(data) {
     if (data && data.length > 0) {
         const trendTitle = document.getElementById('trend-title');
         if (trendTitle) {
-            trendTitle.innerText = `Xu hướng tuần (${data[0].date} đến ${data[data.length - 1].date})`;
+            trendTitle.innerText = `Xu hướng vi phạm (Biểu đồ miền: ${data[0].date} đến ${data[data.length - 1].date})`;
         }
     }
 }
 
 function renderHourlyChart(data) {
-    const ctx = document.getElementById('hourlyStatsChart').getContext('2d');
-    if (hourlyChart) hourlyChart.destroy();
+    const canvas = document.getElementById('hourlyStatsChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    if (hourlyChart) { try { hourlyChart.destroy(); } catch(e) {} hourlyChart = null; }
 
     const labels = data.map(d => d.hour);
     const completions = data.map(d => d.completions * 2);
     const violations = data.map(d => d.violations);
+
+    // Area chart gradient fills for completion & violation
+    const compGradient = ctx.createLinearGradient(0, 0, 0, 300);
+    compGradient.addColorStop(0, 'rgba(16, 185, 129, 0.35)');
+    compGradient.addColorStop(1, 'rgba(16, 185, 129, 0.01)');
+
+    const violGradient = ctx.createLinearGradient(0, 0, 0, 300);
+    violGradient.addColorStop(0, 'rgba(239, 68, 68, 0.35)');
+    violGradient.addColorStop(1, 'rgba(239, 68, 68, 0.01)');
 
     hourlyChart = new Chart(ctx, {
         type: 'line',
@@ -378,44 +579,57 @@ function renderHourlyChart(data) {
             labels: labels,
             datasets: [
                 {
-                    label: 'Số sản phẩm hoàn thành',
+                    label: 'Sản phẩm hoàn thành',
                     data: completions,
                     borderColor: '#10b981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.05)',
-                    fill: true,
+                    borderWidth: 2.5,
+                    backgroundColor: compGradient,
+                    fill: 'start',
                     tension: 0.4,
-                    pointRadius: 3,
-                    pointBackgroundColor: '#10b981'
+                    pointRadius: 4,
+                    pointBackgroundColor: '#10b981',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2
                 },
                 {
-                    label: 'Số lỗi vi phạm',
+                    label: 'Lỗi vi phạm',
                     data: violations,
                     borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                    fill: true,
+                    borderWidth: 2.5,
+                    backgroundColor: violGradient,
+                    fill: 'start',
                     tension: 0.4,
-                    pointRadius: 3,
-                    pointBackgroundColor: '#ef4444'
+                    pointRadius: 4,
+                    pointBackgroundColor: '#ef4444',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: false,
             plugins: {
                 legend: {
                     position: 'top',
                     labels: {
-                        boxWidth: 12,
-                        font: { size: 12 }
+                        boxWidth: 14,
+                        padding: 15,
+                        font: { size: 12, weight: '600' }
                     }
+                },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    padding: 10,
+                    cornerRadius: 8
                 }
             },
             scales: {
                 y: {
                     beginAtZero: true,
                     ticks: {
-                        stepSize: 1,
+                        stepSize: 200,
                         precision: 0
                     }
                 },
@@ -604,8 +818,9 @@ async function loadRecentEvents(cameraId) {
     if (!list) return;
 
     try {
-        const response = await fetch(`/api/events?camera_id=${cameraId}&limit=10`);
-        const events = await response.json();
+        const response = await fetch(`/api/events?camera_id=${cameraId}&limit=10&format=list`);
+        const data = await response.json();
+        const events = Array.isArray(data) ? data : (data.events || []);
 
         list.innerHTML = '';
         if (events.length === 0) {

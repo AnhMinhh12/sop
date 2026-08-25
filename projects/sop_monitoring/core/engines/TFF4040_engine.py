@@ -469,13 +469,17 @@ class ProductEngine(BaseEngine):
             elif self.violation_type == "skip_step":
                 msg = "VI PHẠM - BỎ BƯỚC"
             
+            elapsed = (self.last_update_time - self.cycle_start_time) if self.cycle_start_time > 0 else 36.0
+            dur_val = round(elapsed, 1)
+
             res.update({
                 "detected_label": msg,
                 "sop_status": status,
                 "violation_type": self.violation_type or "skip_step",
                 "step_index": 0,
                 "progress_percent": 0,
-                "cycle_time_left": 0.0
+                "cycle_time_left": 0.0,
+                "duration": dur_val
             })
             if hasattr(self, "missing_steps_str") and self.missing_steps_str:
                 res["expected_step"] = self.missing_steps_str

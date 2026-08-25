@@ -136,7 +136,7 @@ class Database:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
 
-            # MỚI: Migration tự động thêm cột definition_id nếu bảng đã tồn tại từ bản cũ
+            # MỚI: Migration tự động thêm cột definition_id và duration nếu bảng đã tồn tại từ bản cũ
             try:
                 cursor.execute("SHOW COLUMNS FROM sop_events LIKE 'definition_id'")
                 if not cursor.fetchone():
@@ -144,7 +144,50 @@ class Database:
                     cursor.execute("ALTER TABLE sop_events ADD COLUMN definition_id INT DEFAULT NULL AFTER camera_id")
                     cursor.execute("ALTER TABLE sop_events ADD CONSTRAINT fk_event_definition FOREIGN KEY (definition_id) REFERENCES sop_definitions(id) ON DELETE SET NULL")
             except Exception as e:
-                logger.warning(f"Database: Migration notice (sop_events): {e}")
+                logger.warning(f"Database: Migration notice (sop_events definition_id): {e}")
+
+            try:
+                cursor.execute("SHOW COLUMNS FROM sop_events LIKE 'duration'")
+                if not cursor.fetchone():
+                    logger.info("Database: Migrating sop_events - adding duration column...")
+                    cursor.execute("ALTER TABLE sop_events ADD COLUMN duration FLOAT DEFAULT NULL AFTER clip_path")
+            except Exception as e:
+                logger.warning(f"Database: Migration notice (sop_events duration): {e}")
+
+            # MỚI: Tự động cập nhật thời gian thực tế cho các bản ghi cũ ở luồng chạy ngầm (Background Thread)
+            def _async_sync_durations():
+                try:
+                    conn_sync = self.get_connection()
+                    cur_sync = conn_sync.cursor()
+                    # Ưu tiên các bản ghi mới nhất trước (ORDER BY id DESC LIMIT 500)
+                    cur_sync.execute("SELECT id, clip_path FROM sop_events WHERE duration IS NULL AND clip_path IS NOT NULL AND clip_path != '' ORDER BY id DESC LIMIT 500")
+                    null_rows = cur_sync.fetchall()
+                    if null_rows:
+                        import cv2
+                        for r in null_rows:
+                            cpath = r.get("clip_path")
+                            eid = r.get("id")
+                            if cpath and os.path.exists(cpath):
+                                cap = cv2.VideoCapture(cpath)
+                                if cap.isOpened():
+                                    fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
+                                    fcount = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                                    if fcount > 0 and fps > 0:
+                                        real_dur = round(fcount / fps, 1)
+                                        cur_sync.execute("UPDATE sop_events SET duration = %s WHERE id = %s", (real_dur, eid))
+                                        cur_sync.execute("UPDATE sop_clips SET duration_sec = %s WHERE event_id = %s", (int(real_dur), eid))
+                                    cap.release()
+                            else:
+                                # Nếu file clip không còn trên đĩa, xóa duration_sec = 10 mặc định cũ để không bị hiển thị 10s sai
+                                cur_sync.execute("UPDATE sop_clips SET duration_sec = NULL WHERE event_id = %s AND duration_sec = 10", (eid,))
+                        conn_sync.commit()
+                    cur_sync.close()
+                    conn_sync.close()
+                except Exception as ex:
+                    logger.warning(f"Database: Background duration sync notice: {ex}")
+
+            import threading
+            threading.Thread(target=_async_sync_durations, daemon=True).start()
 
             # 6. sop_clips — Clip video vi phạm
             cursor.execute("""

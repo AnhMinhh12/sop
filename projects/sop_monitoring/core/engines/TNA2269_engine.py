@@ -286,13 +286,17 @@ class ProductEngine(BaseEngine):
             if self.violation_type == "timeout":
                 msg = "VI PHẠM - QUÁ THỜI GIAN CHỜ CHU KỲ"
 
+            elapsed = (self.last_update_time - self.cycle_start_time) if self.cycle_start_time > 0 else max_cycle_time
+            dur_val = round(elapsed, 1)
+
             res.update({
                 "detected_label": msg,
                 "sop_status": status,
                 "violation_type": self.violation_type or "unknown",
                 "step_index": 0,
                 "progress_percent": 0,
-                "cycle_time_left": 0.0
+                "cycle_time_left": 0.0,
+                "duration": dur_val
             })
 
         return res

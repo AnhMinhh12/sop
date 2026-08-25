@@ -49,9 +49,6 @@ def _init_frame_cache_cleanup():
 # Start frame cache cleanup
 _init_frame_cache_cleanup()
 
-# Import all routes from the central routes.py
-from app import routes
-
 def emit_step_update(camera_id, status_data, hands_detected):
     socketio.emit('step_update', {
         'camera_id': camera_id,
@@ -87,3 +84,6 @@ def emit_camera_status(camera_id: str, status: str):
         'camera_id': camera_id,
         'status': status
     })
+
+# Import all routes from the central routes.py
+from app import routes

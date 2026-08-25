@@ -40,7 +40,8 @@ class EventQueries:
                   expected_step: Optional[str] = None,
                   sop_status: str = "violation",
                   confidence: float = 0.0,
-                  clip_path: str = "") -> Optional[int]:
+                  clip_path: str = "",
+                  duration: Optional[float] = None) -> Optional[int]:
         """
         Ghi nhận một sự kiện vi phạm vào sop_events.
         Trả về event_id nếu thành công, None nếu lỗi.
@@ -73,12 +74,12 @@ class EventQueries:
                 INSERT INTO sop_events (
                     camera_id, definition_id, timestamp, violation_type,
                     step_detected, expected_step, sop_status,
-                    confidence, clip_path
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    confidence, clip_path, duration
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 cam_db_id, def_db_id, timestamp, violation_type,
                 step_detected or "N/A", expected_step,
-                sop_status, confidence, clip_path
+                sop_status, confidence, clip_path, duration
             ))
             
             event_id = cursor.lastrowid
@@ -89,14 +90,14 @@ class EventQueries:
                 cursor.execute("""
                     INSERT INTO sop_clips (event_id, camera_id, file_path, file_size_mb, duration_sec)
                     VALUES (%s, %s, %s, %s, %s)
-                """, (event_id, cam_db_id, clip_path, file_size, 10)) # 10s theo cấu hình mới
+                """, (event_id, cam_db_id, clip_path, file_size, int(duration) if duration else 10))
             
             conn.commit()
             logger.info(
                 f"DB: Logged violation '{violation_type}' for camera "
                 f"{camera_id} (event_id={event_id}, clip_saved={bool(clip_path)})"
             )
-            EventQueries._log_to_file(f"LOG_EVENT: Cam:{camera_id} (DBID:{cam_db_id}), Type:{violation_type}, Status:{sop_status}, ID:{event_id}")
+            EventQueries._log_to_file(f"LOG_EVENT: Cam:{camera_id} (DBID:{cam_db_id}), Type:{violation_type}, Status:{sop_status}, Duration:{duration}, ID:{event_id}")
             return event_id
 
         except Exception as e:
@@ -159,7 +160,7 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_summary(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_daily_summary(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> Dict[str, Any]:
         """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
@@ -185,6 +186,13 @@ class EventQueries:
                 else:
                     where_clause += " AND (d.name LIKE %s OR d.name = %s)"
                     params.extend([f"%{product_id}%", product_id])
+
+            if start_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) >= %s"
+                params.append(start_hour)
+            if end_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) <= %s"
+                params.append(end_hour)
 
             # Đếm lỗi
             cursor.execute(f"""
@@ -212,7 +220,7 @@ class EventQueries:
                 "total_completions": completions,
                 "compliance_rate": round(compliance, 1)
             }
-            EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id}, Prod:{product_id} -> {res}")
+            EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id}, Prod:{product_id}, Hours:{start_hour}-{end_hour} -> {res}")
             return res
         except Exception as e:
             EventQueries._log_to_file(f"GET_SUMMARY_ERROR: {e}")
@@ -223,7 +231,7 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_daily_distribution(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> Dict[str, int]:
+    def get_daily_distribution(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> Dict[str, int]:
         """Phân bổ loại vi phạm trong một ngày cụ thể."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
@@ -250,6 +258,13 @@ class EventQueries:
                     where_clause += " AND (d.name LIKE %s OR d.name = %s)"
                     params.extend([f"%{product_id}%", product_id])
 
+            if start_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) >= %s"
+                params.append(start_hour)
+            if end_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) <= %s"
+                params.append(end_hour)
+
             cursor.execute(f"""
                 SELECT e.violation_type, COUNT(*) as cnt 
                 FROM sop_events e
@@ -274,7 +289,7 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_weekly_trend(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_weekly_trend(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> List[Dict[str, Any]]:
         """Lấy xu hướng vi phạm 7 ngày (Thứ 2 -> Chủ Nhật) của tuần chứa target_date."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
@@ -306,6 +321,13 @@ class EventQueries:
                 else:
                     where_clause += " AND (d.name LIKE %s OR d.name = %s)"
                     params.extend([f"%{product_id}%", product_id])
+
+            if start_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) >= %s"
+                params.append(start_hour)
+            if end_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) <= %s"
+                params.append(end_hour)
 
             # Lấy dữ liệu gộp theo ngày
             cursor.execute(f"""
@@ -339,7 +361,7 @@ class EventQueries:
             if 'conn' in locals(): conn.close()
 
     @staticmethod
-    def get_hourly_stats(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_hourly_stats(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> List[Dict[str, Any]]:
         """Lấy số liệu vi phạm và hoàn thành theo từng giờ trong ngày target_date."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
@@ -366,6 +388,13 @@ class EventQueries:
                     where_clause += " AND (d.name LIKE %s OR d.name = %s)"
                     params.extend([f"%{product_id}%", product_id])
 
+            if start_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) >= %s"
+                params.append(start_hour)
+            if end_hour is not None:
+                where_clause += " AND HOUR(e.timestamp) <= %s"
+                params.append(end_hour)
+
             cursor.execute(f"""
                 SELECT HOUR(e.timestamp) as hr,
                        SUM(CASE WHEN e.sop_status = 'violation' THEN 1 ELSE 0 END) as violations,
@@ -381,7 +410,9 @@ class EventQueries:
             db_data = {row["hr"]: {"violations": int(row["violations"]), "completions": int(row["completions"])} for row in cursor.fetchall()}
             
             hourly = []
-            for h in range(24):
+            start_h = start_hour if start_hour is not None else 0
+            end_h = end_hour if end_hour is not None else 23
+            for h in range(start_h, end_h + 1):
                 data = db_data.get(h, {"violations": 0, "completions": 0})
                 hourly.append({
                     "hour": f"{h:02d}:00",
@@ -391,7 +422,9 @@ class EventQueries:
             return hourly
         except Exception as e:
             logger.error(f"DB Error getting hourly stats: {e}")
-            return [{"hour": f"{h:02d}:00", "violations": 0, "completions": 0} for h in range(24)]
+            start_h = start_hour if start_hour is not None else 0
+            end_h = end_hour if end_hour is not None else 23
+            return [{"hour": f"{h:02d}:00", "violations": 0, "completions": 0} for h in range(start_h, end_h + 1)]
         finally:
             if 'cursor' in locals() and cursor: cursor.close()
             if 'conn' in locals() and conn: conn.close()
@@ -421,45 +454,88 @@ class EventQueries:
             conn.close()
 
     @staticmethod
-    def get_filtered_events(camera_id: Optional[str] = None, product_id: Optional[str] = None, date: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_filtered_events(camera_id: Optional[str] = None,
+                            product_id: Optional[str] = None,
+                            date: Optional[str] = None,
+                            hour: Optional[int] = None,
+                            days: Optional[int] = 15,
+                            page: int = 1,
+                            limit: int = 50) -> Dict[str, Any]:
         """
-        Truy vấn danh sách vi phạm được lọc theo camera, mã sản phẩm và ngày.
+        Truy vấn danh sách vi phạm được lọc theo camera, mã sản phẩm, ngày, giờ và phân trang (mặc định 15 ngày).
         """
+        import math
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
-            query = """
-                SELECT e.*, c.station_id, d.name as definition_name
-                FROM sop_events e
-                LEFT JOIN sop_cameras c ON e.camera_id = c.id
-                LEFT JOIN sop_definitions d ON e.definition_id = d.id
-                WHERE e.sop_status = 'violation'
-            """
+            where_clauses = ["e.sop_status = 'violation'"]
             params = []
+            
             if camera_id:
-                query += " AND c.station_id = %s"
+                where_clauses.append("c.station_id = %s")
                 params.append(camera_id)
             if product_id:
                 if product_id == "TFF4040":
-                    query += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
+                    where_clauses.append("(d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)")
                     params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
                 elif product_id == "626287":
-                    query += " AND (d.name LIKE %s)"
+                    where_clauses.append("(d.name LIKE %s)")
                     params.append("%626287%")
                 else:
-                    query += " AND (d.name LIKE %s OR d.name = %s)"
+                    where_clauses.append("(d.name LIKE %s OR d.name = %s)")
                     params.extend([f"%{product_id}%", product_id])
             if date:
-                query += " AND DATE(e.timestamp) = %s"
+                where_clauses.append("DATE(e.timestamp) = %s")
                 params.append(date)
-            query += " ORDER BY e.timestamp DESC LIMIT %s"
-            params.append(limit)
-            
-            cursor.execute(query, tuple(params))
-            return cursor.fetchall()
+            elif days:
+                where_clauses.append("e.timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)")
+                params.append(int(days))
+
+            if hour is not None and hour != "":
+                where_clauses.append("HOUR(e.timestamp) = %s")
+                params.append(int(hour))
+
+            where_str = " WHERE " + " AND ".join(where_clauses)
+
+            # 1. Đếm tổng số bản ghi
+            count_query = f"""
+                SELECT COUNT(*) as total
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
+                {where_str}
+            """
+            cursor.execute(count_query, tuple(params))
+            count_row = cursor.fetchone()
+            total_count = count_row["total"] if count_row else 0
+
+            # 2. Truy vấn dữ liệu theo trang
+            offset = max(0, (page - 1) * limit)
+            query = f"""
+                SELECT e.*, c.station_id, d.name as definition_name, cl.duration_sec as clip_duration
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
+                LEFT JOIN sop_clips cl ON cl.event_id = e.id
+                {where_str}
+                ORDER BY e.timestamp DESC LIMIT %s OFFSET %s
+            """
+            data_params = list(params) + [limit, offset]
+            cursor.execute(query, tuple(data_params))
+            events = cursor.fetchall()
+
+            total_pages = math.ceil(total_count / limit) if limit > 0 else 1
+
+            return {
+                "events": events,
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "total_pages": max(1, total_pages)
+            }
         except Exception as e:
             logger.error(f"DB Error getting filtered events: {e}")
-            return []
+            return {"events": [], "total": 0, "page": 1, "limit": limit, "total_pages": 1}
         finally:
             cursor.close()
             conn.close()

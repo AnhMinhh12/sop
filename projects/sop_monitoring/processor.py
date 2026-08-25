@@ -232,7 +232,12 @@ class FrameProcessor:
             # 5. Lưu clip
             clip_path = self.clip_saver.save_violation_clip(self.cam_id, frames_to_save)
             
-            # 6. Ghi log vào DB với đường dẫn clip chính xác
+            # Tính thời gian vi phạm thực tế từ số lượng frame đã thu thập hoặc từ violation dict
+            save_fps = self.clip_saver.fps if (hasattr(self.clip_saver, 'fps') and self.clip_saver.fps > 0) else self.fps
+            calc_duration = round(len(frames_to_save) / (save_fps if save_fps > 0 else 15), 1) if frames_to_save else 0.0
+            actual_duration = violation.get("duration", calc_duration)
+
+            # 6. Ghi log vào DB với đường dẫn clip chính xác và thời gian thực tế
             EventQueries.log_event(
                 camera_id=self.cam_id, 
                 violation_type=violation.get("violation_type", "unknown"),
@@ -240,7 +245,8 @@ class FrameProcessor:
                 expected_step=violation.get("expected_step"),
                 sop_status="violation", 
                 confidence=violation.get("confidence", 1.0), 
-                clip_path=clip_path
+                clip_path=clip_path,
+                duration=actual_duration
             )
             
         threading.Thread(target=background_task, daemon=True).start()

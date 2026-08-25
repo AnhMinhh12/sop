@@ -53,6 +53,7 @@ class ViolationDetector:
                 "confidence": sm_status.get("confidence", 0.0),
                 "timestamp": current_time,
                 "total_violations": self.violation_count,
+                "duration": sm_status.get("duration")
             }
         else:
             # Reset khi trở lại trạng thái bình thường (Thêm 'processing' và 'idle')

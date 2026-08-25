@@ -1,12 +1,13 @@
 import cv2
 import os
 import time
+import json
 import psutil
 import logging
 from flask import render_template, Response, jsonify, request, send_from_directory
 
 logger = logging.getLogger(__name__)
-from app import app, processors
+from app import app, processors, emit_step_update
 from shared.services.config_loader import ConfigLoader
 from shared.services.disk_monitor import DiskMonitor
 from shared.db.db import db
@@ -221,13 +222,29 @@ def get_cameras():
 @app.route('/api/events')
 def get_events():
     limit = request.args.get('limit', 50, type=int)
+    page = request.args.get('page', 1, type=int)
     camera_id = request.args.get('camera_id', None)
     product_id = request.args.get('product_id', None)
     date = request.args.get('date', None)
+    hour = request.args.get('hour', None)
+    
+    days_param = request.args.get('days', 15)
+    days = int(days_param) if (days_param and str(days_param).isdigit()) else 15
+    if date:
+        days = None # Nếu người dùng chọn ngày cụ thể, bỏ qua lọc 15 ngày mặc định
 
-    events = EventQueries.get_filtered_events(camera_id=camera_id, product_id=product_id, date=date, limit=limit)
+    res = EventQueries.get_filtered_events(
+        camera_id=camera_id,
+        product_id=product_id,
+        date=date,
+        hour=hour,
+        days=days,
+        page=page,
+        limit=limit
+    )
 
     # Chuyển datetime và BIGINT thành string để tránh lỗi precision ở Frontend JS
+    events = res.get("events", [])
     for ev in events:
         if ev.get("id"):
             ev["id"] = str(ev["id"])
@@ -238,7 +255,10 @@ def get_events():
         if ev.get("timestamp"):
             ev["timestamp"] = str(ev["timestamp"])
 
-    return jsonify(events)
+    if request.args.get('format') == 'list':
+        return jsonify(events)
+
+    return jsonify(res)
 
 
 @app.route('/api/station/<camera_id>/products')
@@ -282,7 +302,9 @@ def get_stat_summary():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
     product_id = request.args.get('product_id')
-    summary = EventQueries.get_daily_summary(target_date, camera_id=camera_id, product_id=product_id)
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+    summary = EventQueries.get_daily_summary(target_date, camera_id=camera_id, product_id=product_id, start_hour=start_hour, end_hour=end_hour)
     return jsonify(summary)
 
 
@@ -291,7 +313,9 @@ def get_stat_trend():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
     product_id = request.args.get('product_id')
-    trend = EventQueries.get_weekly_trend(target_date, camera_id=camera_id, product_id=product_id)
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+    trend = EventQueries.get_weekly_trend(target_date, camera_id=camera_id, product_id=product_id, start_hour=start_hour, end_hour=end_hour)
     return jsonify(trend)
 
 
@@ -300,7 +324,9 @@ def get_stat_distribution():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
     product_id = request.args.get('product_id')
-    dist = EventQueries.get_daily_distribution(target_date, camera_id=camera_id, product_id=product_id)
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+    dist = EventQueries.get_daily_distribution(target_date, camera_id=camera_id, product_id=product_id, start_hour=start_hour, end_hour=end_hour)
     return jsonify(dist)
 
 
@@ -309,7 +335,9 @@ def get_stat_hourly():
     target_date = request.args.get('date', time.strftime('%Y-%m-%d'))
     camera_id = request.args.get('camera_id')
     product_id = request.args.get('product_id')
-    hourly = EventQueries.get_hourly_stats(target_date, camera_id=camera_id, product_id=product_id)
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+    hourly = EventQueries.get_hourly_stats(target_date, camera_id=camera_id, product_id=product_id, start_hour=start_hour, end_hour=end_hour)
     return jsonify(hourly)
 
 

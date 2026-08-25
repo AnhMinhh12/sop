@@ -6,24 +6,86 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-    <h2 class="section-title"><span>STATISTICS</span> Thống kê hiệu suất</h2>
-    <div class="filters" style="display: flex; gap: 15px; align-items: center;">
-        <div class="filter-group">
-            <label for="filter-station" style="font-weight: 600; color: #666; margin-right: 8px;">Trạm:</label>
-            <select id="filter-station" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; min-width: 150px;">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: nowrap; gap: 10px; margin-bottom: 20px;">
+    <h2 class="section-title" style="margin-bottom: 0; white-space: nowrap; font-size: 1.25rem;"><span>STATISTICS</span> Thống kê hiệu suất</h2>
+    <div class="filters" style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap;">
+        <div class="filter-group" style="display: flex; align-items: center; gap: 4px; background: #ffffff; padding: 4px 10px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+            <label for="filter-station" style="font-weight: 700; color: #475569; font-size: 0.8rem; white-space: nowrap;">Trạm:</label>
+            <select id="filter-station" style="padding: 3px 6px; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.8rem; font-weight: 600; color: #1e293b; cursor: pointer; outline: none;">
                 <option value="">Tất cả trạm</option>
             </select>
         </div>
-        <div class="filter-group">
-            <label for="filter-product" style="font-weight: 600; color: #666; margin-right: 8px;">Mã hàng:</label>
-            <select id="filter-product" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; min-width: 150px;">
+        <div class="filter-group" style="display: flex; align-items: center; gap: 4px; background: #ffffff; padding: 4px 10px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+            <label for="filter-product" style="font-weight: 700; color: #475569; font-size: 0.8rem; white-space: nowrap;">Mã hàng:</label>
+            <select id="filter-product" style="padding: 3px 6px; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.8rem; font-weight: 600; color: #1e293b; cursor: pointer; outline: none;">
                 <option value="">Tất cả mã</option>
             </select>
         </div>
-        <div class="filter-group">
-            <label for="target-date" style="font-weight: 600; color: #666; margin-right: 8px;">Ngày:</label>
-            <input type="date" id="target-date" class="form-control" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd;">
+        <div class="filter-group" style="display: flex; align-items: center; gap: 4px; background: #ffffff; padding: 4px 10px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+            <label for="target-date" style="font-weight: 700; color: #475569; font-size: 0.8rem; white-space: nowrap;">Ngày:</label>
+            <input type="date" id="target-date" style="padding: 2px 6px; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.8rem; font-weight: 600; color: #1e293b; cursor: pointer; outline: none;">
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 5px; background: #ffffff; padding: 4px 10px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+            <span style="font-weight: 700; color: #2563eb; font-size: 0.8rem; display: flex; align-items: center; gap: 3px; white-space: nowrap;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Lọc giờ:
+            </span>
+            <label for="filter-start-hour" style="font-weight: 600; color: #64748b; font-size: 0.8rem;">Từ</label>
+            <select id="filter-start-hour" style="padding: 3px 6px; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.8rem; font-weight: 600; color: #1e293b; cursor: pointer; outline: none;">
+                <option value="">Tất cả</option>
+                <option value="0">00:00</option>
+                <option value="1">01:00</option>
+                <option value="2">02:00</option>
+                <option value="3">03:00</option>
+                <option value="4">04:00</option>
+                <option value="5">05:00</option>
+                <option value="6">06:00</option>
+                <option value="7">07:00</option>
+                <option value="8">08:00</option>
+                <option value="9">09:00</option>
+                <option value="10">10:00</option>
+                <option value="11">11:00</option>
+                <option value="12">12:00</option>
+                <option value="13">13:00</option>
+                <option value="14">14:00</option>
+                <option value="15">15:00</option>
+                <option value="16">16:00</option>
+                <option value="17">17:00</option>
+                <option value="18">18:00</option>
+                <option value="19">19:00</option>
+                <option value="20">20:00</option>
+                <option value="21">21:00</option>
+                <option value="22">22:00</option>
+                <option value="23">23:00</option>
+            </select>
+            <label for="filter-end-hour" style="font-weight: 600; color: #64748b; font-size: 0.8rem;">đến</label>
+            <select id="filter-end-hour" style="padding: 3px 6px; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.8rem; font-weight: 600; color: #1e293b; cursor: pointer; outline: none;">
+                <option value="">Tất cả</option>
+                <option value="0">00:59</option>
+                <option value="1">01:59</option>
+                <option value="2">02:59</option>
+                <option value="3">03:59</option>
+                <option value="4">04:59</option>
+                <option value="5">05:59</option>
+                <option value="6">06:59</option>
+                <option value="7">07:59</option>
+                <option value="8">08:59</option>
+                <option value="9">09:59</option>
+                <option value="10">10:59</option>
+                <option value="11">11:59</option>
+                <option value="12">12:59</option>
+                <option value="13">13:59</option>
+                <option value="14">14:59</option>
+                <option value="15">15:59</option>
+                <option value="16">16:59</option>
+                <option value="17">17:59</option>
+                <option value="18">18:59</option>
+                <option value="19">19:59</option>
+                <option value="20">20:59</option>
+                <option value="21">21:59</option>
+                <option value="22">22:59</option>
+                <option value="23">23:59</option>
+            </select>
         </div>
     </div>
 </div>
@@ -45,17 +107,21 @@
 
 <div class="charts-container">
     <div class="widget chart-box">
-        <div class="widget-title">Phân bổ loại vi phạm (Ngày chọn)</div>
-        <canvas id="violationPieChart"></canvas>
+        <div class="widget-title">Phân bổ chi tiết loại lỗi vi phạm (Biểu đồ tròn)</div>
+        <div style="position: relative; height: 300px; width: 100%;">
+            <canvas id="violationPieChart"></canvas>
+        </div>
     </div>
     <div class="widget chart-box">
-        <div class="widget-title" id="trend-title">Xu hướng vi phạm (Tuần này)</div>
-        <canvas id="violationLineChart"></canvas>
+        <div class="widget-title" id="trend-title">Xu hướng vi phạm (Biểu đồ miền)</div>
+        <div style="position: relative; height: 300px; width: 100%;">
+            <canvas id="violationLineChart"></canvas>
+        </div>
     </div>
 </div>
-<div class="widget chart-box" style="margin-top: 25px; width: 100%;">
-    <div class="widget-title">Hiệu suất chi tiết theo giờ (Ngày chọn)</div>
-    <div style="position: relative; height: 320px; width: 100%;">
+<div class="widget chart-box" style="margin-top: 25px; width: 100%; height: 380px;">
+    <div class="widget-title">Hiệu suất & Vi phạm thể hiện theo thời gian (Biểu đồ miền)</div>
+    <div style="position: relative; height: 300px; width: 100%;">
         <canvas id="hourlyStatsChart"></canvas>
     </div>
 </div>

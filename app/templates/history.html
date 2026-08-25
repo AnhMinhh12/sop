@@ -13,6 +13,33 @@
         <select id="filter-product" class="filter-input">
             <option value="">Tất cả mã</option>
         </select>
+        <select id="filter-hour" class="filter-input">
+            <option value="">Tất cả giờ</option>
+            <option value="0">00:00 - 01:00</option>
+            <option value="1">01:00 - 02:00</option>
+            <option value="2">02:00 - 03:00</option>
+            <option value="3">03:00 - 04:00</option>
+            <option value="4">04:00 - 05:00</option>
+            <option value="5">05:00 - 06:00</option>
+            <option value="6">06:00 - 07:00</option>
+            <option value="7">07:00 - 08:00</option>
+            <option value="8">08:00 - 09:00</option>
+            <option value="9">09:00 - 10:00</option>
+            <option value="10">10:00 - 11:00</option>
+            <option value="11">11:00 - 12:00</option>
+            <option value="12">12:00 - 13:00</option>
+            <option value="13">13:00 - 14:00</option>
+            <option value="14">14:00 - 15:00</option>
+            <option value="15">15:00 - 16:00</option>
+            <option value="16">16:00 - 17:00</option>
+            <option value="17">17:00 - 18:00</option>
+            <option value="18">18:00 - 19:00</option>
+            <option value="19">19:00 - 20:00</option>
+            <option value="20">20:00 - 21:00</option>
+            <option value="21">21:00 - 22:00</option>
+            <option value="22">22:00 - 23:00</option>
+            <option value="23">23:00 - 00:00</option>
+        </select>
         <input type="date" id="filter-date" class="filter-input">
         <button onclick="applyFilters()" class="btn-primary">Tìm kiếm</button>
     </div>
@@ -27,12 +54,13 @@
                     <th>Mã trạm</th>
                     <th>Loại vi phạm</th>
                     <th>Bước dự kiến</th>
+                    <th>Thời gian</th>
                     <th>Hành động</th>
                 </tr>
             </thead>
             <tbody id="history-list">
                 <tr>
-                    <td colspan="5" style="text-align: center; padding: 40px; color: #888;">
+                    <td colspan="6" style="text-align: center; padding: 40px; color: #888;">
                         Đang tải dữ liệu...
                     </td>
                 </tr>
