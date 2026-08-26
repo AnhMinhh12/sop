@@ -400,48 +400,29 @@ class FrameProcessor:
         # Các ứng viên còn lại chưa được khớp
         unmatched = [c for c in candidates if c not in matched_cands]
         
-        # Nếu thiếu tay, khởi tạo mới từ các ứng viên chưa khớp bằng cách chia đôi màn hình/vị trí tương đối
+        # Nếu có ứng viên chưa khớp, chỉ khởi tạo gán nhãn mới cho các nhãn (left/right) chưa có trong frame này
+        # Dựa trên vị trí X của ứng viên: cx < 0.5 -> right hand, cx >= 0.5 -> left hand (mirror mode)
         if unmatched:
-            # Sắp xếp từ trái sang phải màn hình
-            unmatched = sorted(unmatched, key=lambda x: x["centroid"][0])
-            
-            # Trường hợp mất hoàn toàn cả 2 tay trước đó
-            if not best_left_cand and not best_right_cand:
-                if len(unmatched) == 1:
-                    cx = unmatched[0]["centroid"][0]
-                    # Mirror: bên trái camera (< 0.5) là tay phải, bên phải camera (>= 0.5) là tay trái
-                    label = "right" if cx < 0.5 else "left"
+            used_labels = {h["label"] for h in new_hands_data}
+            for cand in unmatched:
+                cx = cand["centroid"][0]
+                # Nếu nhãn mặc định chưa bị chiếm bởi tay đã track
+                pref_label = "right" if cx < 0.5 else "left"
+                alt_label = "left" if pref_label == "right" else "right"
+                
+                target_label = None
+                if pref_label not in used_labels:
+                    target_label = pref_label
+                elif alt_label not in used_labels:
+                    target_label = alt_label
+                    
+                if target_label:
                     new_hands_data.append({
-                        "label": label,
-                        "centroid": unmatched[0]["centroid"],
-                        "bbox": unmatched[0]["bbox"]
+                        "label": target_label,
+                        "centroid": cand["centroid"],
+                        "bbox": cand["bbox"]
                     })
-                else:
-                    # leftmost là tay phải, rightmost là tay trái (mirror)
-                    new_hands_data.append({
-                        "label": "right",
-                        "centroid": unmatched[0]["centroid"],
-                        "bbox": unmatched[0]["bbox"]
-                    })
-                    new_hands_data.append({
-                        "label": "left",
-                        "centroid": unmatched[-1]["centroid"],
-                        "bbox": unmatched[-1]["bbox"]
-                    })
-            # Chỉ thiếu tay trái
-            elif not best_left_cand:
-                new_hands_data.append({
-                    "label": "left",
-                    "centroid": unmatched[-1]["centroid"],
-                    "bbox": unmatched[-1]["bbox"]
-                })
-            # Chỉ thiếu tay phải
-            elif not best_right_cand:
-                new_hands_data.append({
-                    "label": "right",
-                    "centroid": unmatched[0]["centroid"],
-                    "bbox": unmatched[0]["bbox"]
-                })
+                    used_labels.add(target_label)
                 
         return new_hands_data
 
