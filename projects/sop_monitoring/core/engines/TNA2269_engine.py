@@ -93,10 +93,10 @@ class ProductEngine(BaseEngine):
 
         # Xử lý trạng thái lỗi vi phạm
         if self.is_failed:
-            # Nếu tay quay lại vùng Bước 2 (Khuôn/Lấy SP ra), tự động reset và bắt đầu chu kỳ mới
+            # Nếu tay quay lại vùng Bước 1 (Khuôn/Lấy SP ra), tự động reset và bắt đầu chu kỳ mới
             hand_in_mold = any(self._is_in_zone(side, "mold") for side in ["left", "right"])
             if hand_in_mold:
-                self.log_debug("Tự động reset khi tay quay lại vùng Bước 2 (Khuôn) sau vi phạm.", self.product_id)
+                self.log_debug("Tự động reset khi tay quay lại vùng Bước 1 (Khuôn) sau vi phạm.", self.product_id)
                 self.reset(now=now)
             else:
                 return self._get_status_result(active_zones, "violation", violation_type=self.violation_type)
@@ -104,8 +104,8 @@ class ProductEngine(BaseEngine):
         max_cycle_time = self.config.get("max_cycle_time_sec", 45.0)
 
         # ----------------------------------------------------
-        # FSM BƯỚC 2: LẤY SẢN PHẨM RA KHỎI KHUÔN (Khởi đầu & Kết thúc chu kỳ)
-        # Khuôn rỗng (0) -> Có SP (1) -> Tay vào (2) -> LẤY SP RA (HOÀN THÀNH B2)
+        # FSM BƯỚC 1: LẤY SẢN PHẨM RA KHỎI KHUÔN (Khởi đầu & Kết thúc chu kỳ)
+        # Khuôn rỗng (0) -> Có SP (1) -> Tay vào (2) -> LẤY SP RA (HOÀN THÀNH B1)
         # ----------------------------------------------------
         hand_in_mold = any(self._is_in_zone(side, "mold") for side in ["left", "right"])
         prod_in_mold = self._is_product_in_zone("mold")
@@ -121,32 +121,32 @@ class ProductEngine(BaseEngine):
                 if self.start_zone_entry_time == 0.0:
                     self.start_zone_entry_time = now
                 elif now - self.start_zone_entry_time >= 0.2:
-                    # BƯỚC 2 HOÀN THÀNH CHÍNH THỨC!
+                    # BƯỚC 1 HOÀN THÀNH CHÍNH THỨC!
                     self.step1_stage = 0
 
                     violation_res = None
-                    # Nếu chu kỳ cũ chưa làm Bước 1 (Lấy terminal bàn trái vào khuôn) mà đã lấy SP ra -> Báo lỗi bỏ bước!
-                    if not self.waiting_for_start and not self.step1_done:
+                    # Nếu chu kỳ cũ chưa làm Bước 2 (Lấy terminal bàn trái vào khuôn) mà đã lấy SP ra -> Báo lỗi bỏ bước!
+                    if not self.waiting_for_start and not self.step2_done:
                         missing_name = "Lấy terminal bàn trái vào khuôn"
                         self.log_debug(f"VIOLATION: Bỏ qua bước '{missing_name}' ở chu kỳ cũ! Đã sang chu kỳ mới.", self.product_id)
                         self.is_failed = True
                         self.violation_type = "skipped_step"
-                        self.failed_step_idx = 1
+                        self.failed_step_idx = 2
                         violation_res = self._get_status_result(active_zones, "violation", violation_type="skipped_step")
                         violation_res["expected_step"] = f"Chưa hoàn thành: {missing_name}"
 
-                    # BẮT ĐẦU CHU KỲ MỚI TỪ BƯỚC 2 (Lấy sản phẩm ra khỏi khuôn)
+                    # BẮT ĐẦU CHU KỲ MỚI TỪ BƯỚC 1 (Lấy sản phẩm ra khỏi khuôn)
                     curr_cycle = self.cycle_count + 1
                     self.reset(now=now)
                     self.cycle_count = curr_cycle
                     self.waiting_for_start = False
                     self.cycle_start_time = now
                     self.step_start_time = now
-                    self.step2_done = True
-                    self.current_step_idx = 2
+                    self.step1_done = True
+                    self.current_step_idx = 1
                     self.start_zone_entry_time = 0.0
 
-                    self.log_debug(f"CYCLE {self.cycle_count} STARTED: Step 2 completed (Lấy SP ra khỏi khuôn).", self.product_id)
+                    self.log_debug(f"CYCLE {self.cycle_count} STARTED: Step 1 completed (Lấy SP ra khỏi khuôn).", self.product_id)
 
                     if violation_res:
                         return violation_res
@@ -168,27 +168,27 @@ class ProductEngine(BaseEngine):
             return self._get_status_result(active_zones, "violation", violation_type="timeout")
 
         # ----------------------------------------------------
-        # BƯỚC 1: LẤY TERMINAL BÀN TRÁI VÀO KHUÔN
+        # BƯỚC 2: LẤY TERMINAL BÀN TRÁI VÀO KHUÔN
         # ----------------------------------------------------
-        if not self.step1_done:
+        if not self.step2_done:
             for side in ["left", "right"]:
                 if self._is_in_zone(side, "left_table"):
-                    self._hand_touch_history[f"step1_{side}"] = now
+                    self._hand_touch_history[f"step2_{side}"] = now
 
-                touch_time = self._hand_touch_history.get(f"step1_{side}", 0.0)
+                touch_time = self._hand_touch_history.get(f"step2_{side}", 0.0)
                 if touch_time > 0 and (now - touch_time <= 5.0):
                     if self._is_in_zone(side, "mold"):
-                        dwell_key = f"step1_dwell_{side}"
+                        dwell_key = f"step2_dwell_{side}"
                         if dwell_key not in self._zone_dwell_start or self._zone_dwell_start[dwell_key] == 0.0:
                             self._zone_dwell_start[dwell_key] = now
                         elif now - self._zone_dwell_start[dwell_key] >= 0.2:
-                            self.step1_done = True
+                            self.step2_done = True
                             self.step_start_time = now
-                            self.current_step_idx = 1
-                            self.log_debug(f"STEP 1 COMPLETED (Lấy terminal bàn trái vào khuôn).", self.product_id)
+                            self.current_step_idx = 2
+                            self.log_debug(f"STEP 2 COMPLETED (Lấy terminal bàn trái vào khuôn).", self.product_id)
                             break
                     else:
-                        self._zone_dwell_start[f"step1_{side}"] = 0.0
+                        self._zone_dwell_start[f"step2_{side}"] = 0.0
 
         # Kiểm tra hoàn thành cả 2 bước
         if self.step1_done and self.step2_done:
@@ -197,10 +197,10 @@ class ProductEngine(BaseEngine):
                 self.log_debug(f"Chu kỳ {self.cycle_count} HOÀN THÀNH THÀNH CÔNG (Xong đủ 2 bước)!", self.product_id)
             self.status_msg = "🎉 HOÀN THÀNH CHU KỲ THÀNH CÔNG!"
             return self._get_status_result(active_zones, "completed")
-        elif self.step2_done:
-            self.status_msg = "Đã lấy SP ra khỏi khuôn. Đang chờ: Lấy terminal bàn trái vào khuôn"
+        elif self.step1_done:
+            self.status_msg = "Đã lấy SP ra khỏi khuôn (B1). Đang chờ: Lấy terminal bàn trái vào khuôn (B2)"
         else:
-            self.status_msg = "Đang thực hiện: B1 (Lấy terminal bàn trái vào khuôn)"
+            self.status_msg = "Đang thực hiện: B1 (Lấy sản phẩm ra khỏi khuôn)"
 
         return self._get_status_result(active_zones, "processing")
 
@@ -236,11 +236,11 @@ class ProductEngine(BaseEngine):
         progress_pct = (completed_count / 2.0) * 100.0
 
         if completed_count == 2:
-            cur_step_name = "CHỜ TÍN HIỆU BƯỚC 2 ĐỂ KẾT THÚC CHU KỲ"
-        elif self.step2_done:
-            cur_step_name = "B1 (Lấy terminal bàn trái vào khuôn)"
+            cur_step_name = "CHỜ BƯỚC 1 ĐỂ KẾT THÚC CHU KỲ"
+        elif self.step1_done:
+            cur_step_name = "B2 (Lấy terminal bàn trái vào khuôn)"
         else:
-            cur_step_name = self.sop_steps[1]["step_name"] if len(self.sop_steps) > 1 else "Lấy sản phẩm ra khỏi khuôn"
+            cur_step_name = self.sop_steps[0]["step_name"] if len(self.sop_steps) > 0 else "Lấy sản phẩm ra khỏi khuôn"
 
         detected_parts = []
         for side, zone in active_zones.items():

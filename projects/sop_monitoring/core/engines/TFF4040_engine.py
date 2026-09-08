@@ -285,13 +285,13 @@ class ProductEngine(BaseEngine):
                     self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
 
-            # Lỗi vi phạm quá thời gian chu kỳ (36 giây kể từ lúc bắt đầu chu kỳ)
+            # Lỗi vi phạm quá thời gian chu kỳ (40 giây kể từ lúc bắt đầu chu kỳ)
             cycle_elapsed = now - self.cycle_start_time
-            if cycle_elapsed > 36.0:
+            if cycle_elapsed > 40.0:
                 self.is_failed = True
                 self.violation_type = "timeout"
                 self.failed_step_idx = self.current_step_idx
-                self.log_debug(f"VIOLATION: Cycle Timeout (>36s) at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
+                self.log_debug(f"VIOLATION: Cycle Timeout (>40s) at step {self.current_step_idx} ({current_step['step_name']})", self.product_id)
                 return self._get_status_result(active_zones, "violation", violation_type="timeout")
             
             # --- TỰ ĐỘNG RESET CHU KỲ MỚI LẬP TỨC KHI TAY QUAY LẠI BƯỚC 1 (KHÔNG BÁO LỖI) ---
@@ -430,13 +430,13 @@ class ProductEngine(BaseEngine):
         detected_label = ", ".join(detected_parts) if detected_parts else "Idle"
 
         if self.waiting_for_start:
-            cycle_time_left = 36.0
+            cycle_time_left = 40.0
         elif self.is_failed:
             cycle_time_left = 0.0
         elif self.current_step_idx >= len(self.sop_steps):
             cycle_time_left = 0.0
         else:
-            cycle_time_left = max(0.0, 36.0 - (self.last_update_time - self.cycle_start_time))
+            cycle_time_left = max(0.0, 40.0 - (self.last_update_time - self.cycle_start_time))
 
         res = {
             "sop_status": status,
@@ -452,7 +452,7 @@ class ProductEngine(BaseEngine):
             "hands_info": active_zones,
             "step_list": step_list,
             "cycle_time_left": cycle_time_left,
-            "max_cycle_time": 36.0
+            "max_cycle_time": 40.0
         }
 
         if self.is_failed:
@@ -469,7 +469,7 @@ class ProductEngine(BaseEngine):
             elif self.violation_type == "skip_step":
                 msg = "VI PHẠM - BỎ BƯỚC"
             
-            elapsed = (self.last_update_time - self.cycle_start_time) if self.cycle_start_time > 0 else 36.0
+            elapsed = (self.last_update_time - self.cycle_start_time) if self.cycle_start_time > 0 else 40.0
             dur_val = round(elapsed, 1)
 
             res.update({

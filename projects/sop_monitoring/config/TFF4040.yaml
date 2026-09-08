@@ -1,14 +1,14 @@
-station_id: "01"
-station_name: "Station 01 - Lắp & Check Jig (Reformed)"
+station_id: "07"
+station_name: "Station 07 - Máy 7 (TFF4040)"
 
 # ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
 zones:
   # --- Tọa độ Camera thực tế ---
-  mold: [[0.265, 0.866], [0.104, 0.703], [0.215, 0.448], [0.368, 0.558]]
-  button_right: [[0.055, 0.893], [0.008, 0.835], [0.045, 0.756], [0.096, 0.808]]
-  middle_table: [[0.104, 0.546], [0.191, 0.381], [0.14, 0.351], [0.066, 0.488]]
+  mold: [[0.441, 0.735], [0.616, 0.592], [0.738, 0.854], [0.52, 0.948]]
+  button_right: [[0.341, 0.689], [0.283, 0.714], [0.301, 0.799], [0.367, 0.771]]
+  middle_table: [[0.471, 0.594], [0.606, 0.5], [0.572, 0.414], [0.445, 0.485]]
   # Vùng tham chiếu để chọn 2 tay gần nhất (bao quanh mold + middle_table)
-  work_area: [[0.417, 0.385], [0.198, 0.22], [0.007, 0.697], [0.244, 0.826]]
+  work_area: [[0.38, 0.935], [0.963, 0.711], [0.684, 0.253], [0.23, 0.546]]
 # QUY TRÌNH SOP CHI TIẾT (5 BƯỚC MỚI)
 steps:
   # Bước 1: Robot lấy 2 sản phẩm ra khỏi khuôn

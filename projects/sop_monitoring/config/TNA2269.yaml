@@ -3,28 +3,28 @@ station_name: "Station 06 - Máy 6 (TNA2269)"
 
 # ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
 zones:
-  mold: [[0.553, 0.84], [0.323, 0.896], [0.335, 0.553], [0.523, 0.491]]
-  left_table: [[0.274, 0.426], [0.105, 0.488], [0.11, 0.348], [0.27, 0.277]]
+  mold: [[0.402, 0.805], [0.641, 0.797], [0.64, 0.447], [0.436, 0.461]]
+  left_table: [[0.38, 0.445], [0.191, 0.448], [0.214, 0.146], [0.405, 0.134]]
 
 # QUY TRÌNH SOP CHI TIẾT (2 BƯỚC MÃ TNA2269)
 steps:
-  # Bước 1: Lấy terminal từ bàn trái đưa vào khuôn
-  - step_order: 1
-    step_name: "Lấy terminal bàn trái vào khuôn"
-    logic: "terminal_left_to_mold"
-    required_zone: "left_table"
-    target_zone: "mold"
-    active_hand: "any"
-    min_dwell_sec: 0.3
-
-  # Bước 2: Lấy sản phẩm ra khỏi khuôn
+  # Bước 1: Lấy sản phẩm ra khỏi khuôn
   # Đòi hỏi: 1 tay bất kỳ vào khuôn + Khuôn KHÔNG còn SP
-  - step_order: 2
+  - step_order: 1
     step_name: "Lấy sản phẩm ra khỏi khuôn"
     logic: "take_product_from_mold"
     required_zone: "mold"
     active_hand: "any"
     require_product_absent_in_mold: true
+    min_dwell_sec: 0.3
+
+  # Bước 2: Lấy terminal từ bàn trái đưa vào khuôn
+  - step_order: 2
+    step_name: "Lấy terminal bàn trái vào khuôn"
+    logic: "terminal_left_to_mold"
+    required_zone: "left_table"
+    target_zone: "mold"
+    active_hand: "any"
     min_dwell_sec: 0.3
 
 config:

@@ -22,6 +22,9 @@ products:
   - id: "TNA2269"
     name: "TNA2269"
     sop_file: "projects/sop_monitoring/config/TNA2269.yaml"
+  - id: "639957"
+    name: "639957"
+    sop_file: "projects/sop_monitoring/config/639957.yaml"
 
 inference:
   device: "cpu"
@@ -38,10 +41,23 @@ models:
     iou_threshold: 0.4516
 
 cameras:
+  - id: "machine_04"
+    name: "Máy 4"
+    illustration: "/static/illustration/may_4.jpg"
+    rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.210:554/Streaming/Channels/102"
+    sop_file: "projects/sop_monitoring/config/639957.yaml"
+    engine_id: "639957"
+    allowed_products:
+      - "639957"
+    yolo_model: "shared/models/yolo/639957.onnx"
+    resolution: [640, 480]
+    fps_cap: 15
+    conf_threshold: 0.35
+
   - id: "machine_06"
     name: "Máy 6"
     illustration: "/static/illustration/may_6.png"
-    rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.233:554/Streaming/Channels/102"
+    rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.211:554/Streaming/Channels/102"
     sop_file: "projects/sop_monitoring/config/TNA2269.yaml"
     engine_id: "TNA2269"
     allowed_products:

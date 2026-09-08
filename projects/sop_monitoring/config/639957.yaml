@@ -1,0 +1,48 @@
+station_id: "04"
+station_name: "Station 04 - Máy 4 (639957)"
+
+# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+zones:
+  # Khuôn dập / đúc (ở góc dưới bên phải màn hình)
+  mold: [[0.548, 0.79], [0.637, 0.59], [0.802, 0.774], [0.735, 0.947]]
+  # Bàn giữa (hộp chứa terminal ở giữa)
+  middle_table: [[0.436, 0.76], [0.59, 0.506], [0.503, 0.394], [0.351, 0.634]]
+  # Nút bấm bên trái
+  button_left: [[0.577, 0.501], [0.653, 0.43], [0.61, 0.374], [0.555, 0.431]]
+  # Nút bấm bên phải
+  button_right: [[0.393, 0.835], [0.335, 0.815], [0.297, 0.943], [0.363, 0.947]]
+
+# QUY TRÌNH SOP CHI TIẾT (3 BƯỚC CHO MÃ HÀNG 639957)
+steps:
+  # Bước 1: Lấy sản phẩm ra khỏi khuôn
+  - step_order: 1
+    step_name: "Lấy sản phẩm ra khỏi khuôn"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "mold"
+    min_dwell_sec: 0.3
+
+  # Bước 2: Lắp 4 terminal từ bàn giữa vào khuôn
+  - step_order: 2
+    step_name: "Lắp 4 terminal từ bàn giữa vào khuôn"
+    logic: "multi_trigger"
+    active_hand: "any"
+    required_zone: "mold"
+    required_count: 4
+    min_dwell_sec: 0.2
+
+  # Bước 3: 2 tay đồng thời bấm 2 nút
+  - step_order: 3
+    step_name: "2 tay đồng thời bấm 2 nút"
+    logic: "dual_task"
+    left_zone: "button_left"
+    right_zone: "button_right"
+    min_dwell_sec: 0.2
+
+config:
+  violation_tolerance: 8
+  idle_timeout_frames: 120
+  transition_timeout_sec: 35.0
+  min_step_dwell_sec: 0.2
+  restart_allowed_until_step: 1
+  max_cycle_time_sec: 35.0
