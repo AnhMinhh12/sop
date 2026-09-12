@@ -189,9 +189,30 @@ class FrameProcessor:
             with self.frame_lock:
                 self._loop_count += 1
             
+            # Ghi nhận sự kiện dừng máy khi kết thúc đợt dừng (Downtime Event)
+            if getattr(self.engine, "last_downtime_event", None):
+                downtime_ev = self.engine.last_downtime_event
+                self.engine.last_downtime_event = None
+                try:
+                    dur = downtime_ev.get("duration", 0.0)
+                    EventQueries.log_event(
+                        camera_id=self.cam_id,
+                        violation_type="machine_stop",
+                        step_detected=f"Dừng máy {int(dur)}s (Robot > 5p)",
+                        expected_step="Bước 1: Robot lấy 2 SP",
+                        sop_status="machine_stop",
+                        confidence=1.0,
+                        clip_path="",
+                        duration=dur
+                    )
+                    logger.info(f"FrameProcessor [{self.cam_id}]: Logged machine stop event (duration={dur}s)")
+                except Exception as e:
+                    logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
+
             # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
             is_completed = self.latest_status.get("sop_status") == "completed"
             is_violation = self.latest_status.get("sop_status") == "violation"
+            is_stopped = self.latest_status.get("is_machine_stopped", False)
             step_changed = False
             curr_idx = self.engine.current_step_idx if hasattr(self.engine, 'current_step_idx') else -1
             if curr_idx != self.last_step_idx:
@@ -206,7 +227,7 @@ class FrameProcessor:
             else:
                 # Reset cờ khi quay lại trạng thái bình thường (processing hoặc violation)
                 self._completion_logged = False
-                if is_violation or self._loop_count % 15 == 0:
+                if is_violation or is_stopped or self._loop_count % 15 == 0:
                     emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
 
             elapsed = time.time() - loop_start

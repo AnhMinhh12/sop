@@ -75,6 +75,14 @@ class ProductEngine(BaseEngine):
         self.cycle_start_time = 0.0
         self.robot_in_mold_start_time = 0.0
         
+        # Theo dõi dừng máy (Downtime tracking - chỉ áp dụng máy 7 mã TFF4040)
+        self.step_1_wait_start_time = time.time()
+        self.is_machine_stopped = False
+        self.machine_stopped_duration = 0.0
+        self.stop_count = 0
+        self.total_downtime_sec = 0.0
+        self.last_downtime_event = None
+        
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
 
@@ -239,6 +247,24 @@ class ProductEngine(BaseEngine):
         self.last_update_time = now
         self.hand_dist = self._get_hand_distance()
 
+        # Kiểm tra điều kiện dừng máy (Mã TFF4040 - Máy 7):
+        # Khi đang ở Bước 1 (robot lấy 2 SP) hoặc đang chờ bắt đầu chu kỳ (waiting_for_start)
+        # hoặc đang ở trạng thái lỗi chờ Robot vào bắt đầu lại (mặc định > 5 phút = 300s)
+        if self.current_step_idx == 0 or self.waiting_for_start or self.is_failed:
+            if self.step_1_wait_start_time == 0.0:
+                self.step_1_wait_start_time = now
+            step_1_wait_elapsed = now - self.step_1_wait_start_time
+            downtime_thresh = self.config.get("downtime_threshold_sec", 300.0)
+            if step_1_wait_elapsed >= downtime_thresh:
+                self.is_machine_stopped = True
+                self.machine_stopped_duration = step_1_wait_elapsed
+            else:
+                self.is_machine_stopped = False
+                self.machine_stopped_duration = 0.0
+        else:
+            self.is_machine_stopped = False
+            self.machine_stopped_duration = 0.0
+
         if self._completed_at > 0:
             if now - self._completed_at < 1.5:
                 return self._get_status_result(active_zones, "completed")
@@ -282,7 +308,12 @@ class ProductEngine(BaseEngine):
                         return self._get_status_result(active_zones, "idle")
                 else:
                     self.start_zone_entry_time = 0
-                    self.status_msg = "Sẵn sàng"
+                    if self.is_machine_stopped:
+                        mins = int(self.machine_stopped_duration) // 60
+                        secs = int(self.machine_stopped_duration) % 60
+                        self.status_msg = f"DỪNG MÁY ({mins:02d}:{secs:02d} - Robot chưa lấy SP)"
+                    else:
+                        self.status_msg = "Sẵn sàng"
                     return self._get_status_result(active_zones, "idle")
 
             # Lỗi vi phạm quá thời gian chu kỳ (40 giây kể từ lúc bắt đầu chu kỳ)
@@ -340,19 +371,37 @@ class ProductEngine(BaseEngine):
                 self.status_msg = f"Đang thực hiện: {current_step['step_name']}"
                 return self._get_status_result(active_zones, "processing")
             else:
-                self.status_msg = f"Đang chờ: {current_step['step_name']}"
+                if self.is_machine_stopped and self.current_step_idx == 0:
+                    mins = int(self.machine_stopped_duration) // 60
+                    secs = int(self.machine_stopped_duration) % 60
+                    self.status_msg = f"DỪNG MÁY ({mins:02d}:{secs:02d} - Robot chưa lấy SP)"
+                else:
+                    self.status_msg = f"Đang chờ: {current_step['step_name']}"
 
             pass
 
         return self._get_status_result(active_zones, "processing")
 
     def reset(self, now: float = None) -> None:
+        now_ts = now if now else time.time()
+        # Nếu đang ở trạng thái dừng máy mà bị reset, chốt lại thời lượng dừng máy trước khi reset
+        if self.is_machine_stopped and self.step_1_wait_start_time > 0:
+            downtime_dur = round(now_ts - self.step_1_wait_start_time, 1)
+            self.total_downtime_sec += downtime_dur
+            self.stop_count += 1
+            self.last_downtime_event = {
+                "duration": downtime_dur,
+                "start_time": self.step_1_wait_start_time,
+                "end_time": now_ts
+            }
+            self.log_debug(f"MACHINE RESUMED IN RESET: Stopped for {downtime_dur}s. Total stop count: {self.stop_count}", self.product_id)
+
         self.current_step_idx = 0
         self.is_failed = False
         self.violation_notified = False
         self.violation_type = None
         self.failed_step_idx = -1
-        self.step_start_time = now if now else time.time()
+        self.step_start_time = now_ts
         self.last_trigger_states = {}
         self.waiting_for_start = True
         self.active_step_time = 0.0
@@ -364,15 +413,22 @@ class ProductEngine(BaseEngine):
         self._zone_triggered = {}
         self._hand_entry_time = {}
         self._hit_registered = {}
+        self.hand_history = {"left": [], "right": []}
         self.hit_count = 0
         self.last_completed_zone = None
-        self.last_completed_time = now if now else time.time()
+        self.last_completed_time = now_ts
         self.reset_dwell_start = 0
         self.in_delayed_restart = False
         self.restart_step_idx = 0
         self.start_zone_entry_time = 0.0
         self.cycle_start_time = 0.0
         self.robot_in_mold_start_time = 0.0
+        
+        # Reset bộ đếm chờ Bước 1 cho chu kỳ mới
+        self.step_1_wait_start_time = now if now else time.time()
+        self.is_machine_stopped = False
+        self.machine_stopped_duration = 0.0
+        
         if hasattr(self, "missing_steps_str"):
             delattr(self, "missing_steps_str")
         self.hand_states = {
@@ -391,6 +447,22 @@ class ProductEngine(BaseEngine):
         self.log_debug(f"STEP COMPLETED: {self.current_step_idx + 1}/{len(self.sop_steps)} - {step['step_name']}", self.product_id)
         self.last_completed_zone = step.get("required_zone")
         self.last_completed_time = now
+        
+        # Nếu vừa hoàn thành Bước 1 (index 0)
+        if self.current_step_idx == 0:
+            if self.is_machine_stopped:
+                downtime_dur = round(now - self.step_1_wait_start_time, 1)
+                self.total_downtime_sec += downtime_dur
+                self.stop_count += 1
+                self.is_machine_stopped = False
+                self.last_downtime_event = {
+                    "duration": downtime_dur,
+                    "start_time": self.step_1_wait_start_time,
+                    "end_time": now
+                }
+                self.log_debug(f"MACHINE RESUMED: Stopped for {downtime_dur}s. Total stop count: {self.stop_count}", self.product_id)
+            self.step_1_wait_start_time = 0.0
+            self.machine_stopped_duration = 0.0
         
         # Nếu bước vừa hoàn thành có vùng trùng với Bước 1 thì đánh dấu s1_withdrawn = False
         step_1 = self.sop_steps[0]
@@ -452,8 +524,21 @@ class ProductEngine(BaseEngine):
             "hands_info": active_zones,
             "step_list": step_list,
             "cycle_time_left": cycle_time_left,
-            "max_cycle_time": 40.0
+            "max_cycle_time": 40.0,
+            "is_machine_stopped": self.is_machine_stopped,
+            "machine_stopped_duration": round(self.machine_stopped_duration, 1) if self.is_machine_stopped else 0.0,
+            "stop_count": self.stop_count,
+            "total_downtime_sec": round(self.total_downtime_sec, 1),
+            "machine_status": "stopped" if self.is_machine_stopped else "running"
         }
+
+        if self.is_machine_stopped:
+            mins = int(self.machine_stopped_duration) // 60
+            secs = int(self.machine_stopped_duration) % 60
+            time_str = f"{mins:02d}:{secs:02d}"
+            res["status_msg"] = f"DỪNG MÁY ({time_str} - Robot chưa lấy SP)"
+            if not self.is_failed:
+                res["detected_label"] = f"Dừng máy: {time_str}"
 
         if self.is_failed:
             if violation_type: self.violation_type = violation_type

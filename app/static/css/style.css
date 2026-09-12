@@ -858,6 +858,54 @@ header {
     background: rgba(239, 68, 68, 0.08);
     border-color: rgba(239, 68, 68, 0.2);
 }
+.countdown-banner.state-machine-stopped {
+    background: rgba(234, 88, 12, 0.12);
+    border-color: rgba(234, 88, 12, 0.4);
+    box-shadow: 0 0 15px rgba(234, 88, 12, 0.15);
+}
+
+.machine-stopped-card {
+    border: 2px solid #ea580c !important;
+    box-shadow: 0 0 12px rgba(234, 88, 12, 0.35) !important;
+    animation: stopped-pulse 2s infinite ease-in-out;
+}
+
+@keyframes stopped-pulse {
+    0%, 100% {
+        box-shadow: 0 0 8px rgba(234, 88, 12, 0.2);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(234, 88, 12, 0.5);
+    }
+}
+
+.status-badge.badge-stopped {
+    background: #ea580c !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+}
+
+.downtime-info-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff7ed;
+    border: 1px solid #ffedd5;
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: #9a3412;
+}
+
+.downtime-info-box .badge-tag {
+    background: #ea580c;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
 
 .countdown-timer-icon {
     font-size: 1.5rem;

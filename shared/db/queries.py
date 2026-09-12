@@ -215,10 +215,24 @@ class EventQueries:
             total_cycles = violations + completions
             compliance = 100.0 if total_cycles == 0 else (completions / total_cycles) * 100.0
 
+            # Đếm số lần dừng máy và tổng thời gian dừng (giây/phút)
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt, COALESCE(SUM(duration), 0) as total_sec FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
+                {where_clause} AND (e.sop_status = 'machine_stop' OR e.violation_type = 'machine_stop')
+            """, tuple(params))
+            downtime_row = cursor.fetchone()
+            downtime_count = downtime_row["cnt"] if downtime_row else 0
+            downtime_sec = float(downtime_row["total_sec"]) if downtime_row else 0.0
+
             res = {
                 "total_violations": violations,
                 "total_completions": completions,
-                "compliance_rate": round(compliance, 1)
+                "compliance_rate": round(compliance, 1),
+                "total_downtime_count": downtime_count,
+                "total_downtime_sec": round(downtime_sec, 1),
+                "total_downtime_min": round(downtime_sec / 60.0, 1)
             }
             EventQueries._log_to_file(f"GET_SUMMARY: Date:{target_date}, Cam:{camera_id}, Prod:{product_id}, Hours:{start_hour}-{end_hour} -> {res}")
             return res
@@ -241,7 +255,7 @@ class EventQueries:
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
-            where_clause = "WHERE DATE(e.timestamp) = %s AND e.sop_status = 'violation'"
+            where_clause = "WHERE DATE(e.timestamp) = %s AND (e.sop_status = 'violation' OR e.violation_type = 'machine_stop')"
             params = [target_date]
             
             if camera_id:
@@ -553,7 +567,7 @@ class EventQueries:
         if conn is None: return []
         cursor = conn.cursor()
         try:
-            where_clauses = ["e.sop_status = 'violation'", "DATE(e.timestamp) = %s"]
+            where_clauses = ["(e.sop_status = 'violation' OR e.violation_type = 'machine_stop')", "DATE(e.timestamp) = %s"]
             params = [target_date]
 
             if camera_id and camera_id != "":

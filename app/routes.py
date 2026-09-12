@@ -348,9 +348,30 @@ def get_violation_stats():
     return jsonify(counts)
 
 
+def format_duration_vn(sec):
+    """Quy đổi số giây sang định dạng giờ, phút, giây tiếng Việt."""
+    try:
+        sec = float(sec or 0)
+    except (ValueError, TypeError):
+        return str(sec)
+    if sec <= 0:
+        return "0s"
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = int(round(sec % 60))
+    parts = []
+    if h > 0:
+        parts.append(f"{h} giờ")
+    if m > 0:
+        parts.append(f"{m} phút")
+    if s > 0 or not parts:
+        parts.append(f"{s} giây")
+    return " ".join(parts)
+
+
 @app.route('/api/stats/export_excel')
 def export_stats_excel():
-    """Xuất file Excel (CSV UTF-8 BOM) cho trang thống kê, không bao gồm cột video."""
+    """Xuất file Excel (CSV UTF-8 BOM) cho trang thống kê, bao gồm chỉ số tổng quan và danh sách chi tiết vi phạm / dừng máy."""
     import io
     import csv
 
@@ -359,6 +380,14 @@ def export_stats_excel():
     product_id = request.args.get('product_id')
     start_hour = request.args.get('start_hour', type=int)
     end_hour = request.args.get('end_hour', type=int)
+
+    summary = EventQueries.get_daily_summary(
+        target_date=target_date,
+        camera_id=camera_id,
+        product_id=product_id,
+        start_hour=start_hour,
+        end_hour=end_hour
+    )
 
     events = EventQueries.get_export_events(
         target_date=target_date,
@@ -371,16 +400,42 @@ def export_stats_excel():
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Tiêu đề cột - CHỈ THỐNG KÊ LỖI, KHÔNG CÓ CỘT VIDEO
+    # 1. Phần Tổng quan thống kê & Thông tin lọc
+    writer.writerow(['BÁO CÁO THỐNG KÊ HIỆU SUẤT & VI PHẠM QUY TRÌNH SOP'])
+    writer.writerow(['Ngày thống kê:', target_date])
+    if camera_id:
+        writer.writerow(['Mã trạm / Camera:', camera_id])
+    if product_id:
+        writer.writerow(['Mã sản phẩm / SOP:', product_id])
+    if start_hour is not None or end_hour is not None:
+        h_start = f"{start_hour:02d}:00" if start_hour is not None else "00:00"
+        h_end = f"{end_hour:02d}:59" if end_hour is not None else "23:59"
+        writer.writerow(['Khung giờ:', f"{h_start} - {h_end}"])
+
+    writer.writerow([])
+    writer.writerow(['--- CHỈ SỐ TỔNG QUAN TRONG NGÀY ---'])
+    writer.writerow(['Vi phạm trong ngày:', summary.get('total_violations', 0)])
+    writer.writerow(['Tỷ lệ tuân thủ:', f"{summary.get('compliance_rate', 100.0)}%"])
+    total_comp = summary.get('total_completions', 0)
+    writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_comp * 2}/4540 (Số chu kỳ: {total_comp})"])
+
+    downtime_cnt = summary.get('total_downtime_count', 0)
+    downtime_sec = summary.get('total_downtime_sec', 0.0)
+    writer.writerow(['Dừng máy trong ngày:', f"{downtime_cnt} lần ({format_duration_vn(downtime_sec)})"])
+    writer.writerow([])
+
+    # 2. Tiêu đề bảng chi tiết sự kiện
+    writer.writerow(['--- DANH SÁCH CHI TIẾT SỰ KIỆN / VI PHẠM & DỪNG MÁY ---'])
     writer.writerow([
         'STT', 
         'Ngày', 
         'Giờ', 
         'Mã trạm', 
         'Mã sản phẩm / SOP', 
-        'Loại vi phạm', 
-        'Bước dự kiến', 
-        'Thời lượng (giây)'
+        'Loại sự kiện / Vi phạm', 
+        'Chi tiết thao tác / Bước dự kiến', 
+        'Thời lượng (giây)',
+        'Quy đổi thời gian'
     ])
 
     cat_map = {
@@ -389,7 +444,8 @@ def export_stats_excel():
         'skip_step': 'Lỗi bỏ bước',
         'wrong_sequence': 'Lỗi sai thứ tự',
         'wrong_hand': 'Lỗi sai tay thao tác',
-        'wrong_position': 'Lỗi vị trí linh kiện'
+        'wrong_position': 'Lỗi vị trí linh kiện',
+        'machine_stop': 'Dừng máy (> 5p)'
     }
 
     row_index = 1
@@ -403,19 +459,25 @@ def export_stats_excel():
         date_str = ts.split(' ')[0] if ' ' in ts else ts
         time_str = ts.split(' ')[1] if ' ' in ts else ''
 
-        status_vn = cat_map.get(v_type, 'Sai thao tác')
+        status_vn = cat_map.get(v_type, 'Dừng máy (> 5p)' if (v_type == 'machine_stop' or sop_status == 'machine_stop') else 'Sai thao tác')
 
         dur = ev.get('duration')
         if dur is None or dur == '':
             dur = ev.get('clip_duration')
-        if dur is None or dur == '':
-            dur = '-'
-        else:
+        
+        dur_display = '-'
+        time_converted = '-'
+        if dur is not None and dur != '':
             try:
                 dur_float = float(dur)
-                dur = int(dur_float) if dur_float.is_integer() else round(dur_float, 1)
+                dur_display = int(dur_float) if dur_float.is_integer() else round(dur_float, 1)
+                time_converted = format_duration_vn(dur_float)
             except:
-                pass
+                dur_display = str(dur)
+
+        step_info = ev.get('step_detected') if (v_type == 'machine_stop' or sop_status == 'machine_stop') else (ev.get('expected_step') or '-')
+        if not step_info or step_info == 'N/A':
+            step_info = ev.get('expected_step') or '-'
 
         writer.writerow([
             row_index,
@@ -424,8 +486,9 @@ def export_stats_excel():
             ev.get('station_id') or (f"Trạm {ev.get('camera_id')}" if ev.get('camera_id') else '-'),
             ev.get('definition_name') or ev.get('product_id') or '-',
             status_vn,
-            ev.get('expected_step') or '-',
-            dur
+            step_info,
+            dur_display,
+            time_converted
         ])
         row_index += 1
 

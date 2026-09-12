@@ -63,7 +63,12 @@ def emit_step_update(camera_id, status_data, hands_detected):
         'sop_status': status_data.get('sop_status', 'idle'),
         'progress_percent': status_data.get('progress_percent', 0),
         'hands_detected': hands_detected,
-        'cycle_time_left': status_data.get('cycle_time_left', 38.0)
+        'cycle_time_left': status_data.get('cycle_time_left', 38.0),
+        'is_machine_stopped': status_data.get('is_machine_stopped', False),
+        'machine_stopped_duration': status_data.get('machine_stopped_duration', 0.0),
+        'stop_count': status_data.get('stop_count', 0),
+        'total_downtime_sec': status_data.get('total_downtime_sec', 0.0),
+        'machine_status': status_data.get('machine_status', 'running')
     })
 
 def emit_violation(camera_id, violation_data):

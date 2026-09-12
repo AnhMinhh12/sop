@@ -65,3 +65,4 @@ config:
   transition_timeout_sec: 9999.0
   min_step_dwell_sec: 0.3
   restart_allowed_until_step: 2  # Cho phép reset tự động đến bước 2
+  downtime_threshold_sec: 300.0  # Robot chưa hoàn thành bước 1 sau 5 phút tính là dừng máy

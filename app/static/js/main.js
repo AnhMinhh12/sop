@@ -210,8 +210,11 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
 
         events.forEach(ev => {
             let vTypeVN = "";
+            const isMachineStop = (ev.violation_type === 'machine_stop' || ev.sop_status === 'machine_stop');
             if (ev.violation_type === 'success' || ev.sop_status === 'completed') {
                 vTypeVN = 'Hoàn thành';
+            } else if (isMachineStop) {
+                vTypeVN = 'Dừng máy';
             } else if (ev.violation_type === 'timeout' || ev.violation_type === 'idle_timeout') {
                 vTypeVN = 'Quá giờ';
             } else {
@@ -231,7 +234,7 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
                 timeStr = parts[1] ? parts[1].split('.')[0] : '';
             }
 
-            // Tính thời gian vi phạm (s)
+            // Tính thời gian vi phạm / dừng máy (s)
             let durationStr = '-';
             if (ev.duration !== null && ev.duration !== undefined && ev.duration !== '') {
                 const durNum = parseFloat(ev.duration);
@@ -241,18 +244,25 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
             }
 
             const isViolation = ev.sop_status === 'violation';
+            let typeColorClass = 'text-secondary';
+            if (isMachineStop) {
+                typeColorClass = 'text-orange-600 font-bold';
+            } else if (isViolation) {
+                typeColorClass = 'text-danger';
+            }
+
             const row = document.createElement('tr');
             row.className = 'event-row';
-            if (!isViolation) row.style.opacity = '0.8';
+            if (!isViolation && !isMachineStop) row.style.opacity = '0.8';
             row.innerHTML = `
                 <td>${dateStr}</td>
                 <td><span class="font-mono font-semibold text-slate-700">${timeStr}</span></td>
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
-                <td><span class="event-type ${isViolation ? 'text-danger' : 'text-secondary'}">${vTypeVN}</span></td>
+                <td><span class="event-type ${typeColorClass}">${vTypeVN}</span></td>
                 <td>${ev.expected_step || '-'}</td>
                 <td><span class="font-mono text-slate-700 font-semibold">${durationStr}</span></td>
                 <td>
-                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
+                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : (isMachineStop ? '<span class="badge text-xs font-semibold" style="background:#ffedd5;color:#c2410c;padding:2px 8px;border-radius:4px;">Robot quá 1p</span>' : '<span class="text-xs text-slate-400">Không có video</span>')}
                 </td>
             `;
             list.appendChild(row);
@@ -415,6 +425,24 @@ function exportStatsExcel() {
     window.location.href = url;
 }
 
+/**
+ * Định dạng thời gian dừng máy chi tiết (Giờ, Phút, Giây)
+ */
+function formatDowntimeDisplay(secTotal) {
+    const total = parseFloat(secTotal) || 0;
+    if (total <= 0) return '0s';
+    if (total < 60) {
+        return `${Math.round(total)}s`;
+    }
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = Math.round(total % 60);
+    if (h > 0) {
+        return `${h}h ${m}p ${s.toString().padStart(2, '0')}s`;
+    }
+    return `${m}p ${s.toString().padStart(2, '0')}s`;
+}
+
 async function loadStats(date, cameraId = "", productId = "", startHour = "", endHour = "") {
     try {
         // Clean up inputs
@@ -433,6 +461,10 @@ async function loadStats(date, cameraId = "", productId = "", startHour = "", en
         document.getElementById('total-violations').innerText = summary.total_violations;
         document.getElementById('total-completions').innerText = `${summary.total_completions * 2}/4540`;
         document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
+        const downtimeEl = document.getElementById('total-downtime');
+        if (downtimeEl) {
+            downtimeEl.innerText = `${summary.total_downtime_count || 0} lần (${formatDowntimeDisplay(summary.total_downtime_sec)})`;
+        }
 
         // 2. Pie Chart (Biểu đồ tròn chi tiết loại lỗi)
         const distRes = await fetch(`/api/stats/distribution?${filter}`);
@@ -465,6 +497,7 @@ function renderPieChart(data) {
         'wrong_sequence': { name: 'Lỗi sai thứ tự', color: '#dc2626' },
         'wrong_hand': { name: 'Lỗi sai tay thao tác', color: '#8b5cf6' },
         'wrong_position': { name: 'Lỗi vị trí linh kiện', color: '#ec4899' },
+        'machine_stop': { name: 'Dừng máy (> 5p)', color: '#ea580c' },
     };
 
     const labels = [];
@@ -749,6 +782,18 @@ function renderStationDetail(cam) {
                     <div class="progress-bar"><div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div></div>
                 </div>
 
+                ${cam.id === 'machine_07' ? `
+                <div class="downtime-info-box" id="downtime-box-${cam.id}">
+                    <div class="flex items-center gap-2">
+                        <span class="badge-tag">MÁY 7 - TFF4040</span>
+                        <span class="font-medium text-slate-700" id="downtime-status-text-${cam.id}">Trạng thái: Đang hoạt động</span>
+                    </div>
+                    <div class="text-xs text-slate-500 font-semibold" id="downtime-stats-${cam.id}">
+                        Dừng: 0 lần (0 phút)
+                    </div>
+                </div>
+                ` : ''}
+
                 <div class="sop-section" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
                     <div class="panel-title">Quy trình thực hiện (SOP)</div>
                     <div id="sop-list-${cam.id}" class="sop-steps-checklist" style="flex: 1;"></div>
@@ -933,7 +978,11 @@ function showToast(title, message, type = 'info') {
 
 // Socket IO logic giữ nguyên
 socket.on('step_update', (data) => {
-    const { camera_id, cycle_count, current_step, status_msg, progress_percent, step_index, cycle_time_left } = data;
+    const { 
+        camera_id, cycle_count, current_step, status_msg, 
+        progress_percent, step_index, cycle_time_left,
+        is_machine_stopped, machine_stopped_duration, stop_count, total_downtime_sec, machine_status
+    } = data;
     
     // --- CẬP NHẬT TRANG THỐNG KÊ REALTIME ---
     if (data.sop_status === 'completed' || data.sop_status === 'violation') {
@@ -951,6 +1000,15 @@ socket.on('step_update', (data) => {
     const cycle = document.getElementById(`cycle-count-${camera_id}`);
     const statusFooter = document.getElementById(`status-msg-${camera_id}`);
     const statusIndicator = document.getElementById(`status-${camera_id}`);
+    const overviewCard = document.getElementById(`overview-${camera_id}`);
+    const statusBadge = document.getElementById(`status-badge-${camera_id}`);
+    const countdownVal = document.getElementById(`countdown-val-${camera_id}`);
+    const countdownFill = document.getElementById(`countdown-bar-fill-${camera_id}`);
+    const countdownBanner = document.getElementById(`countdown-banner-${camera_id}`);
+    const countdownLabel = document.getElementById(`countdown-label-${camera_id}`);
+    const countdownIcon = document.getElementById(`countdown-icon-${camera_id}`);
+    const downtimeStatusText = document.getElementById(`downtime-status-text-${camera_id}`);
+    const downtimeStats = document.getElementById(`downtime-stats-${camera_id}`);
 
     if (fill) fill.style.width = `${progress_percent}%`;
     if (label) label.innerText = current_step;
@@ -964,54 +1022,121 @@ socket.on('step_update', (data) => {
         statusIndicator.style.color = "#15803d";
     }
 
-    // Cập nhật Countdown Timer
-    const countdownVal = document.getElementById(`countdown-val-${camera_id}`);
-    const countdownFill = document.getElementById(`countdown-bar-fill-${camera_id}`);
-    const countdownBanner = document.getElementById(`countdown-banner-${camera_id}`);
-    const countdownLabel = document.getElementById(`countdown-label-${camera_id}`);
-    const countdownIcon = document.getElementById(`countdown-icon-${camera_id}`);
+    // --- XỬ LÝ TRẠNG THÁI DỪNG MÁY (MÁY 7 - TFF4040) ---
+    if (is_machine_stopped) {
+        const dur = machine_stopped_duration || 0;
+        const mins = Math.floor(dur / 60).toString().padStart(2, '0');
+        const secs = Math.floor(dur % 60).toString().padStart(2, '0');
+        const stopTimeStr = `${mins}:${secs}`;
 
-    if (cycle_time_left !== undefined) {
-        if (countdownVal) countdownVal.innerText = `${cycle_time_left.toFixed(1)}s`;
+        // 1. Thẻ tổng quan (Overview Card)
+        if (overviewCard) {
+            overviewCard.classList.add('machine-stopped-card');
+        }
+        if (statusBadge) {
+            statusBadge.innerText = `DỪNG MÁY (${stopTimeStr})`;
+            statusBadge.classList.add('badge-stopped');
+        }
+        if (label) {
+            label.innerText = `⚠️ Dừng máy: Robot chưa lấy SP (${stopTimeStr})`;
+            label.style.color = '#c2410c';
+        }
+
+        // 2. Chi tiết trạm (Station Detail)
+        if (statusIndicator) {
+            statusIndicator.innerText = "DỪNG MÁY";
+            statusIndicator.style.background = "#ffedd5";
+            statusIndicator.style.color = "#c2410c";
+        }
+
+        if (countdownBanner) {
+            countdownBanner.classList.remove('state-normal', 'state-warning', 'state-danger');
+            countdownBanner.classList.add('state-machine-stopped');
+        }
+        if (countdownIcon) countdownIcon.innerText = `🛑`;
+        if (countdownLabel) countdownLabel.innerText = `MÁY TẠM DỪNG: `;
+        if (statusFooter) statusFooter.innerText = `Robot chưa lấy SP (> 5 phút)`;
+        if (countdownVal) countdownVal.innerText = `Dừng ${stopTimeStr}`;
         if (countdownFill) {
-            const maxCycleTime = data.max_cycle_time || 38.0;
-            const percentage = (cycle_time_left / maxCycleTime) * 100;
-            countdownFill.style.width = `${percentage}%`;
-            
-            // Remove previous classes
+            countdownFill.style.width = '100%';
+            countdownFill.style.background = '#ea580c';
             countdownFill.classList.remove('warning', 'danger');
-            if (countdownBanner) {
-                countdownBanner.classList.remove('state-normal', 'state-warning', 'state-danger');
-            }
+        }
 
-            if (data.sop_status === 'violation') {
-                countdownFill.classList.add('danger');
-                if (countdownBanner) countdownBanner.classList.add('state-danger');
-                if (countdownVal) countdownVal.innerText = `TIMEOUT`;
-                if (countdownLabel) countdownLabel.innerText = `Lỗi quá giờ: `;
-                if (countdownIcon) countdownIcon.innerText = `🚨`;
-            } else if (cycle_time_left <= 5.0) {
-                countdownFill.classList.add('danger');
-                if (countdownBanner) countdownBanner.classList.add('state-danger');
-                if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
-                if (countdownIcon) countdownIcon.innerText = `⚠️`;
-            } else if (cycle_time_left <= 15.0) {
-                countdownFill.classList.add('warning');
-                if (countdownBanner) countdownBanner.classList.add('state-warning');
-                if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
-                if (countdownIcon) countdownIcon.innerText = `⏱️`;
-            } else {
-                if (countdownBanner) countdownBanner.classList.add('state-normal');
-                if (countdownLabel) {
-                    if (data.sop_status === 'idle') {
-                        countdownLabel.innerText = `Chu kỳ tiếp theo: `;
-                        if (countdownIcon) countdownIcon.innerText = `⏱️`;
-                    } else if (data.sop_status === 'completed') {
-                        countdownLabel.innerText = `Hoàn thành chu kỳ! `;
-                        if (countdownIcon) countdownIcon.innerText = `✅`;
-                    } else {
-                        countdownLabel.innerText = `Chu kỳ: `;
-                        if (countdownIcon) countdownIcon.innerText = `⏱️`;
+        // 3. Widget Dừng máy
+        if (downtimeStatusText) {
+            downtimeStatusText.innerHTML = `<span class="text-orange-600 font-bold">⚠️ DỪNG MÁY (${stopTimeStr})</span>`;
+        }
+        if (downtimeStats) {
+            downtimeStats.innerText = `Số lần dừng: ${stop_count || 0} | Tổng dừng: ${formatDowntimeDisplay(total_downtime_sec)}`;
+        }
+    } else {
+        // Trạng thái bình thường
+        if (overviewCard) {
+            overviewCard.classList.remove('machine-stopped-card');
+        }
+        if (statusBadge) {
+            statusBadge.classList.remove('badge-stopped');
+        }
+        if (label) {
+            label.style.color = '';
+        }
+        if (countdownBanner) {
+            countdownBanner.classList.remove('state-machine-stopped');
+        }
+        if (countdownFill) {
+            countdownFill.style.background = '';
+        }
+        if (downtimeStatusText) {
+            downtimeStatusText.innerHTML = `<span class="text-emerald-600 font-medium">Trạng thái: Đang hoạt động</span>`;
+        }
+        if (downtimeStats) {
+            downtimeStats.innerText = `Số lần dừng: ${stop_count || 0} | Tổng dừng: ${formatDowntimeDisplay(total_downtime_sec)}`;
+        }
+
+        // Cập nhật Countdown Timer khi máy hoạt động bình thường
+        if (cycle_time_left !== undefined) {
+            if (countdownVal) countdownVal.innerText = `${cycle_time_left.toFixed(1)}s`;
+            if (countdownFill) {
+                const maxCycleTime = data.max_cycle_time || 38.0;
+                const percentage = (cycle_time_left / maxCycleTime) * 100;
+                countdownFill.style.width = `${percentage}%`;
+                
+                // Remove previous classes
+                countdownFill.classList.remove('warning', 'danger');
+                if (countdownBanner) {
+                    countdownBanner.classList.remove('state-normal', 'state-warning', 'state-danger');
+                }
+
+                if (data.sop_status === 'violation') {
+                    countdownFill.classList.add('danger');
+                    if (countdownBanner) countdownBanner.classList.add('state-danger');
+                    if (countdownVal) countdownVal.innerText = `TIMEOUT`;
+                    if (countdownLabel) countdownLabel.innerText = `Lỗi quá giờ: `;
+                    if (countdownIcon) countdownIcon.innerText = `🚨`;
+                } else if (cycle_time_left <= 5.0) {
+                    countdownFill.classList.add('danger');
+                    if (countdownBanner) countdownBanner.classList.add('state-danger');
+                    if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
+                    if (countdownIcon) countdownIcon.innerText = `⚠️`;
+                } else if (cycle_time_left <= 15.0) {
+                    countdownFill.classList.add('warning');
+                    if (countdownBanner) countdownBanner.classList.add('state-warning');
+                    if (countdownLabel) countdownLabel.innerText = `Thời gian còn lại: `;
+                    if (countdownIcon) countdownIcon.innerText = `⏱️`;
+                } else {
+                    if (countdownBanner) countdownBanner.classList.add('state-normal');
+                    if (countdownLabel) {
+                        if (data.sop_status === 'idle') {
+                            countdownLabel.innerText = `Chu kỳ tiếp theo: `;
+                            if (countdownIcon) countdownIcon.innerText = `⏱️`;
+                        } else if (data.sop_status === 'completed') {
+                            countdownLabel.innerText = `Hoàn thành chu kỳ! `;
+                            if (countdownIcon) countdownIcon.innerText = `✅`;
+                        } else {
+                            countdownLabel.innerText = `Chu kỳ: `;
+                            if (countdownIcon) countdownIcon.innerText = `⏱️`;
+                        }
                     }
                 }
             }
