@@ -174,8 +174,11 @@ class EventQueries:
             params = [target_date]
             
             if camera_id:
-                where_clause += " AND c.station_id = %s"
-                params.append(camera_id)
+                clean_id = str(camera_id).replace("machine_", "").replace("station_", "").lstrip("0")
+                cam_m = f"machine_{clean_id.zfill(2)}" if clean_id else camera_id
+                cam_s = f"station_{clean_id.zfill(2)}" if clean_id else camera_id
+                where_clause += " AND (c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR e.camera_id = %s)"
+                params.extend([camera_id, cam_m, cam_s, clean_id, camera_id])
             if product_id:
                 if product_id == "TFF4040":
                     where_clause += " AND (d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)"
@@ -571,8 +574,11 @@ class EventQueries:
             params = [target_date]
 
             if camera_id and camera_id != "":
-                where_clauses.append("c.station_id = %s")
-                params.append(camera_id)
+                clean_id = str(camera_id).replace("machine_", "").replace("station_", "").lstrip("0")
+                cam_m = f"machine_{clean_id.zfill(2)}" if clean_id else camera_id
+                cam_s = f"station_{clean_id.zfill(2)}" if clean_id else camera_id
+                where_clauses.append("(c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR e.camera_id = %s)")
+                params.extend([camera_id, cam_m, cam_s, clean_id, camera_id])
             if product_id and product_id != "":
                 if product_id == "TFF4040":
                     where_clauses.append("(d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)")

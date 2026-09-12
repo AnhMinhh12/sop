@@ -805,6 +805,27 @@ function renderStationDetail(cam) {
     // Khởi tạo các thành phần
     initProductSelector(cam.id, cam.engine_id);
     renderSopChecklist(cam.id);
+    if (cam.id === 'machine_07') {
+        loadStationDowntime(cam.id);
+    }
+}
+
+/**
+ * Tải số liệu dừng máy trong ngày từ API cho trạm
+ */
+async function loadStationDowntime(cameraId) {
+    if (cameraId !== 'machine_07') return;
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const res = await fetch(`/api/stats/summary?camera_id=${cameraId}&date=${today}`);
+        const data = await res.json();
+        const downtimeStats = document.getElementById(`downtime-stats-${cameraId}`);
+        if (downtimeStats) {
+            downtimeStats.innerText = `Số lần dừng: ${data.total_downtime_count || 0} | Tổng dừng: ${formatDowntimeDisplay(data.total_downtime_sec)}`;
+        }
+    } catch (e) {
+        console.error("Error loading station downtime:", e);
+    }
 }
 
 /**

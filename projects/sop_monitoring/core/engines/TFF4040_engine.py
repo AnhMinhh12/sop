@@ -82,6 +82,17 @@ class ProductEngine(BaseEngine):
         self.stop_count = 0
         self.total_downtime_sec = 0.0
         self.last_downtime_event = None
+
+        # Tải số lần và thời gian dừng máy đã ghi nhận trong ngày từ DB
+        try:
+            from shared.db.queries import EventQueries
+            today_str = time.strftime('%Y-%m-%d')
+            db_summary = EventQueries.get_daily_summary(today_str, camera_id=self.station_id)
+            self.stop_count = int(db_summary.get("total_downtime_count", 0))
+            self.total_downtime_sec = float(db_summary.get("total_downtime_sec", 0.0))
+            logger.info(f"ProductEngine [TFF4040]: Loaded today's downtime history for {self.station_id}: {self.stop_count} stops, {self.total_downtime_sec}s")
+        except Exception as e:
+            logger.warning(f"ProductEngine [TFF4040]: Could not load downtime history from DB: {e}")
         
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
@@ -259,9 +270,13 @@ class ProductEngine(BaseEngine):
                 self.is_machine_stopped = True
                 self.machine_stopped_duration = step_1_wait_elapsed
             else:
+                if self.is_machine_stopped:
+                    self._handle_machine_resumed(now)
                 self.is_machine_stopped = False
                 self.machine_stopped_duration = 0.0
         else:
+            if self.is_machine_stopped:
+                self._handle_machine_resumed(now)
             self.is_machine_stopped = False
             self.machine_stopped_duration = 0.0
 
@@ -382,19 +397,30 @@ class ProductEngine(BaseEngine):
 
         return self._get_status_result(active_zones, "processing")
 
-    def reset(self, now: float = None) -> None:
-        now_ts = now if now else time.time()
-        # Nếu đang ở trạng thái dừng máy mà bị reset, chốt lại thời lượng dừng máy trước khi reset
+    def _handle_machine_resumed(self, now: float) -> None:
+        """Xử lý chốt thời lượng dừng và cộng dồn khi máy chạy lại."""
         if self.is_machine_stopped and self.step_1_wait_start_time > 0:
-            downtime_dur = round(now_ts - self.step_1_wait_start_time, 1)
+            downtime_dur = round(now - self.step_1_wait_start_time, 1)
             self.total_downtime_sec += downtime_dur
             self.stop_count += 1
             self.last_downtime_event = {
                 "duration": downtime_dur,
                 "start_time": self.step_1_wait_start_time,
-                "end_time": now_ts
+                "end_time": now
             }
-            self.log_debug(f"MACHINE RESUMED IN RESET: Stopped for {downtime_dur}s. Total stop count: {self.stop_count}", self.product_id)
+            self.log_debug(
+                f"MACHINE RESUMED: Stopped for {downtime_dur}s. Total stop count: {self.stop_count}, Total downtime: {self.total_downtime_sec}s",
+                self.product_id
+            )
+        self.is_machine_stopped = False
+        self.machine_stopped_duration = 0.0
+        self.step_1_wait_start_time = now
+
+    def reset(self, now: float = None) -> None:
+        now_ts = now if now else time.time()
+        # Nếu đang ở trạng thái dừng máy mà bị reset, chốt lại thời lượng dừng máy trước khi reset
+        if self.is_machine_stopped:
+            self._handle_machine_resumed(now_ts)
 
         self.current_step_idx = 0
         self.is_failed = False
@@ -451,16 +477,7 @@ class ProductEngine(BaseEngine):
         # Nếu vừa hoàn thành Bước 1 (index 0)
         if self.current_step_idx == 0:
             if self.is_machine_stopped:
-                downtime_dur = round(now - self.step_1_wait_start_time, 1)
-                self.total_downtime_sec += downtime_dur
-                self.stop_count += 1
-                self.is_machine_stopped = False
-                self.last_downtime_event = {
-                    "duration": downtime_dur,
-                    "start_time": self.step_1_wait_start_time,
-                    "end_time": now
-                }
-                self.log_debug(f"MACHINE RESUMED: Stopped for {downtime_dur}s. Total stop count: {self.stop_count}", self.product_id)
+                self._handle_machine_resumed(now)
             self.step_1_wait_start_time = 0.0
             self.machine_stopped_duration = 0.0
         
