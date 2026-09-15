@@ -477,21 +477,34 @@ class EventQueries:
                             hour: Optional[int] = None,
                             days: Optional[int] = 15,
                             page: int = 1,
-                            limit: int = 50) -> Dict[str, Any]:
+                            limit: int = 50,
+                            event_type: Optional[str] = "violation") -> Dict[str, Any]:
         """
-        Truy vấn danh sách vi phạm được lọc theo camera, mã sản phẩm, ngày, giờ và phân trang (mặc định 15 ngày).
+        Truy vấn danh sách sự kiện được lọc theo camera, mã sản phẩm, ngày, giờ, phân trang và loại sự kiện.
+        event_type: 'violation' (mặc định), 'downtime' / 'machine_stop', 'all'.
         """
         import math
         conn = db.get_connection()
         cursor = conn.cursor()
         try:
-            where_clauses = ["e.sop_status = 'violation'"]
+            where_clauses = []
+            if event_type in ("downtime", "machine_stop"):
+                where_clauses.append("(e.sop_status = 'machine_stop' OR e.violation_type = 'machine_stop')")
+            elif event_type == "all":
+                where_clauses.append("(e.sop_status = 'violation' OR e.sop_status = 'machine_stop' OR e.violation_type = 'machine_stop')")
+            else:
+                where_clauses.append("e.sop_status = 'violation'")
+
             params = []
             
-            if camera_id:
-                where_clauses.append("c.station_id = %s")
-                params.append(camera_id)
-            if product_id:
+            if camera_id and camera_id not in ("undefined", "null", "all", ""):
+                clean_id = str(camera_id).replace("machine_", "").replace("station_", "").lstrip("0")
+                cam_m = f"machine_{clean_id.zfill(2)}" if clean_id else camera_id
+                cam_s = f"station_{clean_id.zfill(2)}" if clean_id else camera_id
+                where_clauses.append("(c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR e.camera_id = %s)")
+                params.extend([camera_id, cam_m, cam_s, clean_id, camera_id])
+
+            if product_id and product_id not in ("undefined", "null", "all", ""):
                 if product_id == "TFF4040":
                     where_clauses.append("(d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)")
                     params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
@@ -501,7 +514,8 @@ class EventQueries:
                 else:
                     where_clauses.append("(d.name LIKE %s OR d.name = %s)")
                     params.extend([f"%{product_id}%", product_id])
-            if date:
+
+            if date and date != "":
                 where_clauses.append("DATE(e.timestamp) = %s")
                 params.append(date)
             elif days:
@@ -514,17 +528,21 @@ class EventQueries:
 
             where_str = " WHERE " + " AND ".join(where_clauses)
 
-            # 1. Đếm tổng số bản ghi
-            count_query = f"""
-                SELECT COUNT(*) as total
+            # 1. Đếm tổng số bản ghi và thống kê thời lượng dừng (nếu là mục downtime)
+            stats_query = f"""
+                SELECT COUNT(*) as total,
+                       COALESCE(SUM(duration), 0) as total_duration_sec,
+                       COALESCE(AVG(duration), 0) as avg_duration_sec
                 FROM sop_events e
                 LEFT JOIN sop_cameras c ON e.camera_id = c.id
                 LEFT JOIN sop_definitions d ON e.definition_id = d.id
                 {where_str}
             """
-            cursor.execute(count_query, tuple(params))
-            count_row = cursor.fetchone()
-            total_count = count_row["total"] if count_row else 0
+            cursor.execute(stats_query, tuple(params))
+            stats_row = cursor.fetchone()
+            total_count = stats_row["total"] if stats_row else 0
+            total_duration_sec = round(float(stats_row["total_duration_sec"]), 1) if stats_row else 0.0
+            avg_duration_sec = round(float(stats_row["avg_duration_sec"]), 1) if stats_row else 0.0
 
             # 2. Truy vấn dữ liệu theo trang
             offset = max(0, (page - 1) * limit)
@@ -548,11 +566,84 @@ class EventQueries:
                 "total": total_count,
                 "page": page,
                 "limit": limit,
-                "total_pages": max(1, total_pages)
+                "total_pages": max(1, total_pages),
+                "total_duration_sec": total_duration_sec,
+                "avg_duration_sec": avg_duration_sec,
+                "event_type": event_type
             }
         except Exception as e:
             logger.error(f"DB Error getting filtered events: {e}")
-            return {"events": [], "total": 0, "page": 1, "limit": limit, "total_pages": 1}
+            return {
+                "events": [], "total": 0, "page": 1, "limit": limit, "total_pages": 1,
+                "total_duration_sec": 0.0, "avg_duration_sec": 0.0, "event_type": event_type
+            }
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def get_export_downtime_events(target_date: Optional[str] = None,
+                                   camera_id: Optional[str] = None,
+                                   product_id: Optional[str] = None,
+                                   start_hour: Optional[int] = None,
+                                   end_hour: Optional[int] = None,
+                                   days: Optional[int] = 15) -> List[Dict[str, Any]]:
+        """
+        Truy vấn tất cả sự kiện dừng máy để xuất báo cáo Excel/CSV.
+        """
+        conn = db.get_connection()
+        if conn is None: return []
+        cursor = conn.cursor()
+        try:
+            where_clauses = ["(e.sop_status = 'machine_stop' OR e.violation_type = 'machine_stop')"]
+            params = []
+
+            if camera_id and camera_id not in ("undefined", "null", "all", ""):
+                clean_id = str(camera_id).replace("machine_", "").replace("station_", "").lstrip("0")
+                cam_m = f"machine_{clean_id.zfill(2)}" if clean_id else camera_id
+                cam_s = f"station_{clean_id.zfill(2)}" if clean_id else camera_id
+                where_clauses.append("(c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR c.station_id = %s OR e.camera_id = %s)")
+                params.extend([camera_id, cam_m, cam_s, clean_id, camera_id])
+
+            if product_id and product_id not in ("undefined", "null", "all", ""):
+                if product_id == "TFF4040":
+                    where_clauses.append("(d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s OR d.name LIKE %s)")
+                    params.extend(["%TFF4040%", "%Reformed%", "%TEST MODEL%", "%Sản phẩm A%"])
+                elif product_id == "626287":
+                    where_clauses.append("(d.name LIKE %s)")
+                    params.append("%626287%")
+                else:
+                    where_clauses.append("(d.name LIKE %s OR d.name = %s)")
+                    params.extend([f"%{product_id}%", product_id])
+
+            if target_date and target_date != "":
+                where_clauses.append("DATE(e.timestamp) = %s")
+                params.append(target_date)
+            elif days:
+                where_clauses.append("e.timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)")
+                params.append(int(days))
+
+            if start_hour is not None and start_hour != "":
+                where_clauses.append("HOUR(e.timestamp) >= %s")
+                params.append(int(start_hour))
+            if end_hour is not None and end_hour != "":
+                where_clauses.append("HOUR(e.timestamp) <= %s")
+                params.append(int(end_hour))
+
+            where_str = " WHERE " + " AND ".join(where_clauses)
+            query = f"""
+                SELECT e.*, c.station_id, d.name as definition_name
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
+                {where_str}
+                ORDER BY e.timestamp DESC
+            """
+            cursor.execute(query, tuple(params))
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"DB Error getting export downtime events: {e}")
+            return []
         finally:
             cursor.close()
             conn.close()

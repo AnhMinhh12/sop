@@ -227,6 +227,7 @@ def get_events():
     product_id = request.args.get('product_id', None)
     date = request.args.get('date', None)
     hour = request.args.get('hour', None)
+    event_type = request.args.get('event_type', request.args.get('type', 'violation'))
     
     days_param = request.args.get('days', 15)
     days = int(days_param) if (days_param and str(days_param).isdigit()) else 15
@@ -240,7 +241,8 @@ def get_events():
         hour=hour,
         days=days,
         page=page,
-        limit=limit
+        limit=limit,
+        event_type=event_type
     )
 
     # Chuyển datetime và BIGINT thành string để tránh lỗi precision ở Frontend JS
@@ -495,6 +497,100 @@ def export_stats_excel():
     # Mã hóa utf-8-sig để Excel mở trực tiếp không bị lỗi tiếng Việt
     csv_bytes = output.getvalue().encode('utf-8-sig')
     filename = f"Thong_Ke_Hieu_Suat_{target_date}.csv"
+
+    return Response(
+        csv_bytes,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.route('/api/events/export_downtime_excel')
+def export_downtime_excel():
+    """Xuất file Excel (CSV UTF-8 BOM) cho lịch sử dừng máy."""
+    import io
+    import csv
+
+    target_date = request.args.get('date', '')
+    camera_id = request.args.get('camera_id')
+    product_id = request.args.get('product_id')
+    start_hour = request.args.get('start_hour', type=int)
+    end_hour = request.args.get('end_hour', type=int)
+    days = 15 if not target_date else None
+
+    events = EventQueries.get_export_downtime_events(
+        target_date=target_date,
+        camera_id=camera_id,
+        product_id=product_id,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        days=days
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(['BÁO CÁO LỊCH SỬ DỪNG MÁY'])
+    if target_date:
+        writer.writerow(['Ngày lọc:', target_date])
+    else:
+        writer.writerow(['Khoảng thời gian:', '15 ngày gần nhất'])
+    if camera_id:
+        writer.writerow(['Mã trạm / Máy:', camera_id])
+    if product_id:
+        writer.writerow(['Mã sản phẩm / SOP:', product_id])
+    if start_hour is not None or end_hour is not None:
+        h_start = f"{start_hour:02d}:00" if start_hour is not None else "00:00"
+        h_end = f"{end_hour:02d}:59" if end_hour is not None else "23:59"
+        writer.writerow(['Khung giờ:', f"{h_start} - {h_end}"])
+
+    total_stops = len(events)
+    total_dur_sec = sum([float(ev.get('duration') or 0) for ev in events])
+    avg_dur_sec = (total_dur_sec / total_stops) if total_stops > 0 else 0.0
+
+    writer.writerow([])
+    writer.writerow(['--- TỔNG QUAN DỪNG MÁY ---'])
+    writer.writerow(['Tổng số lần dừng:', f"{total_stops} lần"])
+    writer.writerow(['Tổng thời gian dừng:', format_duration_vn(total_dur_sec)])
+    writer.writerow(['Thời gian dừng trung bình / lần:', format_duration_vn(avg_dur_sec)])
+    writer.writerow([])
+
+    writer.writerow([
+        'STT',
+        'Ngày',
+        'Thời điểm bắt đầu dừng',
+        'Mã trạm / Máy',
+        'Mã sản phẩm / SOP',
+        'Nguyên nhân / Vị trí dừng',
+        'Thời lượng dừng (giây)',
+        'Quy đổi thời gian dừng',
+        'Trạng thái'
+    ])
+
+    for idx, ev in enumerate(events, start=1):
+        ts = str(ev.get('timestamp', ''))
+        date_str = ts.split(' ')[0] if ' ' in ts else ts
+        time_str = ts.split(' ')[1] if ' ' in ts else ''
+        station = ev.get('station_id') or f"Trạm {ev.get('camera_id')}"
+        prod_name = ev.get('definition_name') or '-'
+        clean_prod = prod_name.replace(' (Auto)', '') if prod_name else '-'
+        step_info = ev.get('step_detected') or 'Robot chưa lấy SP (> 5p)'
+        dur = float(ev.get('duration') or 0)
+
+        writer.writerow([
+            idx,
+            date_str,
+            time_str,
+            station,
+            clean_prod,
+            step_info,
+            int(dur) if dur.is_integer() else round(dur, 1),
+            format_duration_vn(dur),
+            'Dừng máy'
+        ])
+
+    csv_bytes = output.getvalue().encode('utf-8-sig')
+    filename = f"Lich_Su_Dung_May_{target_date or '15ngay'}.csv"
 
     return Response(
         csv_bytes,

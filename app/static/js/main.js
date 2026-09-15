@@ -67,7 +67,7 @@ async function initDashboard() {
     }
 
     // 3. Nếu là trang Lịch sử
-    if (historyList) {
+    if (historyList || document.getElementById('tab-btn-violations')) {
         const urlParams = new URLSearchParams(window.location.search);
         const cameraId = urlParams.get('camera_id') || "";
         initHistoryPage(cameraId);
@@ -115,10 +115,64 @@ async function loadProducts(stationId = '', selectElementId = 'filter-product') 
     }
 }
 
+let currentHistoryTab = 'violations';
 let currentHistoryPage = 1;
+let currentDowntimePage = 1;
 const historyItemsPerPage = 50;
+const downtimeItemsPerPage = 50;
+
+/**
+ * Chuyển đổi tab giữa Lịch sử vi phạm và Lịch sử dừng máy
+ */
+function switchHistoryTab(tabName) {
+    currentHistoryTab = tabName;
+    const btnViolations = document.getElementById('tab-btn-violations');
+    const btnDowntime = document.getElementById('tab-btn-downtime');
+    const paneViolations = document.getElementById('tab-content-violations');
+    const paneDowntime = document.getElementById('tab-content-downtime');
+
+    if (btnViolations && btnDowntime && paneViolations && paneDowntime) {
+        if (tabName === 'downtime') {
+            btnViolations.classList.remove('active');
+            btnViolations.style.background = 'transparent';
+            btnViolations.style.color = '#64748b';
+
+            btnDowntime.classList.add('active');
+            btnDowntime.style.background = '#ffffff';
+            btnDowntime.style.color = '#ea580c';
+
+            paneViolations.style.display = 'none';
+            paneDowntime.style.display = 'block';
+
+            // Tải dữ liệu dừng máy nếu chưa tải
+            applyDowntimeFilters();
+        } else {
+            btnDowntime.classList.remove('active');
+            btnDowntime.style.background = 'transparent';
+            btnDowntime.style.color = '#64748b';
+
+            btnViolations.classList.add('active');
+            btnViolations.style.background = '#ffffff';
+            btnViolations.style.color = 'var(--primary)';
+
+            paneDowntime.style.display = 'none';
+            paneViolations.style.display = 'block';
+
+            // Tải dữ liệu vi phạm
+            applyFilters();
+        }
+    }
+
+    // Cập nhật URL parameter mà không load lại trang
+    try {
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tabName);
+        window.history.replaceState({}, '', url);
+    } catch (e) {}
+}
 
 async function initHistoryPage(selectedId = "") {
+    // 1. Khởi tạo bộ lọc cho Lịch sử vi phạm
     const stationSelect = document.getElementById('filter-station');
     const productSelect = document.getElementById('filter-product');
     const hourSelect = document.getElementById('filter-hour');
@@ -137,10 +191,7 @@ async function initHistoryPage(selectedId = "") {
         });
     }
 
-    // Load products dropdown on init
     await loadProducts(selectedId, 'filter-product');
-
-    loadHistory(selectedId, productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
 
     if (stationSelect) {
         stationSelect.onchange = async () => {
@@ -161,11 +212,58 @@ async function initHistoryPage(selectedId = "") {
         };
     }
 
-    // Gán sự kiện cho nút tìm kiếm nếu chưa có
-    const searchBtn = document.querySelector('.btn-primary');
-    if (searchBtn) {
-        searchBtn.onclick = () => {
-            loadHistory(stationSelect ? stationSelect.value : "", productSelect ? productSelect.value : "", dateInput ? dateInput.value : "", hourSelect ? hourSelect.value : "", 1);
+    // 2. Khởi tạo bộ lọc cho Lịch sử dừng máy
+    await initDowntimeHistory(selectedId);
+
+    // 3. Kiểm tra tab mặc định từ URL query param
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialTab = urlParams.get('tab') || 'violations';
+    switchHistoryTab(initialTab);
+}
+
+async function initDowntimeHistory(selectedId = "") {
+    const dtStationSelect = document.getElementById('filter-downtime-station');
+    const dtProductSelect = document.getElementById('filter-downtime-product');
+    const dtHourSelect = document.getElementById('filter-downtime-hour');
+    const dtDateInput = document.getElementById('filter-downtime-date');
+
+    if (dtStationSelect && dtStationSelect.options.length <= 1) {
+        const response = await fetch('/api/cameras');
+        const cameras = await response.json();
+        cameras.forEach(cam => {
+            const opt = document.createElement('option');
+            const camId = cam.id || cam.station_id;
+            opt.value = camId;
+            opt.textContent = cam.name;
+            if (camId === selectedId) opt.selected = true;
+            dtStationSelect.appendChild(opt);
+        });
+    }
+
+    await loadProducts(selectedId, 'filter-downtime-product');
+
+    if (dtStationSelect) {
+        dtStationSelect.onchange = async () => {
+            await loadProducts(dtStationSelect.value, 'filter-downtime-product');
+            applyDowntimeFilters();
+        };
+    }
+
+    if (dtProductSelect) {
+        dtProductSelect.onchange = () => {
+            applyDowntimeFilters();
+        };
+    }
+
+    if (dtHourSelect) {
+        dtHourSelect.onchange = () => {
+            applyDowntimeFilters();
+        };
+    }
+
+    if (dtDateInput) {
+        dtDateInput.onchange = () => {
+            applyDowntimeFilters();
         };
     }
 }
@@ -180,14 +278,28 @@ function applyFilters() {
     }
 }
 
+function applyDowntimeFilters() {
+    const stationSelect = document.getElementById('filter-downtime-station');
+    const productSelect = document.getElementById('filter-downtime-product');
+    const hourSelect = document.getElementById('filter-downtime-hour');
+    const dateInput = document.getElementById('filter-downtime-date');
+    
+    const stationVal = stationSelect ? stationSelect.value : "";
+    const productVal = productSelect ? productSelect.value : "";
+    const dateVal = dateInput ? dateInput.value : "";
+    const hourVal = hourSelect ? hourSelect.value : "";
+
+    loadDowntimeHistory(stationVal, productVal, dateVal, hourVal, 1);
+}
+
 async function loadHistory(stationId = '', productId = '', date = '', hour = '', page = 1) {
     currentHistoryPage = page;
     const list = document.getElementById('history-list');
     const paginationContainer = document.getElementById('pagination');
     if (!list) return;
-    list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu...</td></tr>';
+    list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu vi phạm...</td></tr>';
 
-    let url = `/api/events?page=${page}&limit=${historyItemsPerPage}&days=15`;
+    let url = `/api/events?event_type=violation&page=${page}&limit=${historyItemsPerPage}&days=15`;
     if (stationId) url += `&camera_id=${stationId}`;
     if (productId) url += `&product_id=${productId}`;
     if (date) url += `&date=${date}`;
@@ -203,7 +315,7 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
         list.innerHTML = '';
 
         if (events.length === 0) {
-            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi nào (15 ngày qua)</td></tr>';
+            list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi vi phạm nào (15 ngày qua)</td></tr>';
             if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
@@ -221,7 +333,6 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
                 vTypeVN = 'Sai thao tác';
             }
 
-            // Tách timestamp thành Ngày và Giờ riêng biệt
             let dateStr = ev.timestamp || '';
             let timeStr = '-';
             if (dateStr.includes(' ')) {
@@ -234,7 +345,6 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
                 timeStr = parts[1] ? parts[1].split('.')[0] : '';
             }
 
-            // Tính thời gian vi phạm / dừng máy (s)
             let durationStr = '-';
             if (ev.duration !== null && ev.duration !== undefined && ev.duration !== '') {
                 const durNum = parseFloat(ev.duration);
@@ -244,36 +354,33 @@ async function loadHistory(stationId = '', productId = '', date = '', hour = '',
             }
 
             const isViolation = ev.sop_status === 'violation';
-            let typeColorClass = 'text-secondary';
-            if (isMachineStop) {
-                typeColorClass = 'text-orange-600 font-bold';
-            } else if (isViolation) {
-                typeColorClass = 'text-danger';
-            }
+            let typeColorClass = isViolation ? 'text-danger' : 'text-secondary';
+
+            const prodName = ev.definition_name ? ev.definition_name.replace(' (Auto)', '') : '-';
 
             const row = document.createElement('tr');
             row.className = 'event-row';
-            if (!isViolation && !isMachineStop) row.style.opacity = '0.8';
+            if (!isViolation) row.style.opacity = '0.8';
             row.innerHTML = `
                 <td>${dateStr}</td>
                 <td><span class="font-mono font-semibold text-slate-700">${timeStr}</span></td>
                 <td><span class="badge-station">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
+                <td><span class="font-semibold text-slate-600">${prodName}</span></td>
                 <td><span class="event-type ${typeColorClass}">${vTypeVN}</span></td>
                 <td>${ev.expected_step || '-'}</td>
                 <td><span class="font-mono text-slate-700 font-semibold">${durationStr}</span></td>
                 <td>
-                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : (isMachineStop ? '<span class="badge text-xs font-semibold" style="background:#ffedd5;color:#c2410c;padding:2px 8px;border-radius:4px;">Robot quá 1p</span>' : '<span class="text-xs text-slate-400">Không có video</span>')}
+                    ${isViolation && ev.clip_path ? `<button class="btn-action" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', '${vTypeVN}')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
                 </td>
             `;
             list.appendChild(row);
         });
 
-        // Vẽ bộ chuyển trang
         renderPagination(paginationContainer, page, totalPages, total);
 
     } catch (err) { 
         console.error(err); 
-        list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu</td></tr>'; 
+        list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu</td></tr>'; 
     }
 }
 
@@ -294,10 +401,8 @@ function renderPagination(container, currentPage, totalPages, totalCount) {
 
     let pageButtonsHtml = '';
 
-    // Nút Trang trước
     pageButtonsHtml += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changeHistoryPage(${currentPage - 1})">❮ Trang trước</button>`;
 
-    // Hiển thị các số trang
     const maxVisiblePages = 5;
     let startPage = Math.max(1, currentPage - 2);
     let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
@@ -320,7 +425,6 @@ function renderPagination(container, currentPage, totalPages, totalCount) {
         pageButtonsHtml += `<button class="page-btn" onclick="changeHistoryPage(${totalPages})">${totalPages}</button>`;
     }
 
-    // Nút Trang sau
     pageButtonsHtml += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changeHistoryPage(${currentPage + 1})">Trang sau ❯</button>`;
 
     container.innerHTML = `
@@ -344,6 +448,184 @@ function changeHistoryPage(newPage) {
 
     loadHistory(stationId, productId, date, hour, newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/**
+ * Tải danh sách và thống kê lịch sử dừng máy
+ */
+async function loadDowntimeHistory(stationId = '', productId = '', date = '', hour = '', page = 1) {
+    currentDowntimePage = page;
+    const list = document.getElementById('downtime-history-list');
+    const paginationContainer = document.getElementById('downtime-pagination');
+    if (!list) return;
+
+    list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu dừng máy...</td></tr>';
+
+    let url = `/api/events?event_type=downtime&page=${page}&limit=${downtimeItemsPerPage}&days=15`;
+    if (stationId) url += `&camera_id=${stationId}`;
+    if (productId) url += `&product_id=${productId}`;
+    if (date) url += `&date=${date}`;
+    if (hour !== "" && hour !== null && hour !== undefined) url += `&hour=${hour}`;
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        const events = Array.isArray(data) ? data : (data.events || []);
+        const total = data.total !== undefined ? data.total : events.length;
+        const totalPages = data.total_pages !== undefined ? data.total_pages : 1;
+        const totalDurationSec = data.total_duration_sec || 0.0;
+        const avgDurationSec = data.avg_duration_sec || 0.0;
+
+        // Cập nhật các thẻ KPI
+        const countEl = document.getElementById('downtime-kpi-count');
+        const totalTimeEl = document.getElementById('downtime-kpi-total-time');
+        const avgTimeEl = document.getElementById('downtime-kpi-avg-time');
+
+        if (countEl) countEl.innerText = `${total} lần`;
+        if (totalTimeEl) totalTimeEl.innerText = formatDowntimeDisplay(totalDurationSec);
+        if (avgTimeEl) avgTimeEl.innerText = formatDowntimeDisplay(avgDurationSec);
+
+        list.innerHTML = '';
+
+        if (events.length === 0) {
+            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi dừng máy nào</td></tr>';
+            if (paginationContainer) paginationContainer.innerHTML = '';
+            return;
+        }
+
+        events.forEach(ev => {
+            let dateStr = ev.timestamp || '';
+            let timeStr = '-';
+            if (dateStr.includes(' ')) {
+                const parts = dateStr.split(' ');
+                dateStr = parts[0];
+                timeStr = parts.slice(1).join(' ');
+            } else if (dateStr.includes('T')) {
+                const parts = dateStr.split('T');
+                dateStr = parts[0];
+                timeStr = parts[1] ? parts[1].split('.')[0] : '';
+            }
+
+            const durNum = parseFloat(ev.duration || 0);
+            const durationFormatted = formatDowntimeDisplay(durNum);
+            const durSecOnly = Number.isInteger(durNum) ? `${durNum}s` : `${durNum.toFixed(1)}s`;
+
+            const prodName = ev.definition_name ? ev.definition_name.replace(' (Auto)', '') : '-';
+            const reasonText = ev.step_detected || 'Robot chưa lấy SP (> 5p)';
+
+            const row = document.createElement('tr');
+            row.className = 'event-row';
+            row.innerHTML = `
+                <td>${dateStr}</td>
+                <td><span class="font-mono font-semibold text-slate-700">${timeStr}</span></td>
+                <td><span class="badge-station" style="background:#fff7ed;color:#ea580c;border:1px solid #fed7aa;font-weight:700;">${ev.station_id || 'Trạm ' + ev.camera_id}</span></td>
+                <td><span class="font-semibold text-slate-700">${prodName}</span></td>
+                <td><span class="text-slate-600">${reasonText}</span></td>
+                <td>
+                    <span class="badge-downtime-duration">
+                        ⏱️ ${durationFormatted} <small class="text-slate-500 font-normal">(${durSecOnly})</small>
+                    </span>
+                </td>
+                <td>
+                    <span class="badge-downtime-recovered">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        Đã kết thúc
+                    </span>
+                </td>
+            `;
+            list.appendChild(row);
+        });
+
+        renderDowntimePagination(paginationContainer, page, totalPages, total);
+
+    } catch (err) {
+        console.error("Error loading downtime history:", err);
+        list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu dừng máy</td></tr>';
+    }
+}
+
+function renderDowntimePagination(container, currentPage, totalPages, totalCount) {
+    if (!container) return;
+    if (totalPages <= 1 && totalCount <= downtimeItemsPerPage) {
+        container.innerHTML = `
+            <div class="pagination-container">
+                <div class="pagination-info">Hiển thị <strong>${totalCount}</strong> lần dừng máy</div>
+                <div></div>
+            </div>
+        `;
+        return;
+    }
+
+    const startItem = (currentPage - 1) * downtimeItemsPerPage + 1;
+    const endItem = Math.min(currentPage * downtimeItemsPerPage, totalCount);
+
+    let pageButtonsHtml = '';
+
+    pageButtonsHtml += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changeDowntimePage(${currentPage - 1})">❮ Trang trước</button>`;
+
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    if (startPage > 1) {
+        pageButtonsHtml += `<button class="page-btn" onclick="changeDowntimePage(1)">1</button>`;
+        if (startPage > 2) pageButtonsHtml += `<span style="padding: 0 6px; color: #94a3b8; font-weight: bold;">...</span>`;
+    }
+
+    for (let p = startPage; p <= endPage; p++) {
+        pageButtonsHtml += `<button class="page-btn ${p === currentPage ? 'active' : ''}" style="${p === currentPage ? 'background:#ea580c;border-color:#ea580c;' : ''}" onclick="changeDowntimePage(${p})">${p}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pageButtonsHtml += `<span style="padding: 0 6px; color: #94a3b8; font-weight: bold;">...</span>`;
+        pageButtonsHtml += `<button class="page-btn" onclick="changeDowntimePage(${totalPages})">${totalPages}</button>`;
+    }
+
+    pageButtonsHtml += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changeDowntimePage(${currentPage + 1})">Trang sau ❯</button>`;
+
+    container.innerHTML = `
+        <div class="pagination-container">
+            <div class="pagination-info">Hiển thị <strong>${startItem}-${endItem}</strong> trong tổng số <strong>${totalCount}</strong> lần dừng máy</div>
+            <div class="pagination-controls">${pageButtonsHtml}</div>
+        </div>
+    `;
+}
+
+function changeDowntimePage(newPage) {
+    const stationSelect = document.getElementById('filter-downtime-station');
+    const productSelect = document.getElementById('filter-downtime-product');
+    const hourSelect = document.getElementById('filter-downtime-hour');
+    const dateInput = document.getElementById('filter-downtime-date');
+
+    const stationVal = stationSelect ? stationSelect.value : "";
+    const productVal = productSelect ? productSelect.value : "";
+    const dateVal = dateInput ? dateInput.value : "";
+    const hourVal = hourSelect ? hourSelect.value : "";
+
+    loadDowntimeHistory(stationVal, productVal, dateVal, hourVal, newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exportDowntimeExcel() {
+    const stationSelect = document.getElementById('filter-downtime-station');
+    const productSelect = document.getElementById('filter-downtime-product');
+    const hourSelect = document.getElementById('filter-downtime-hour');
+    const dateInput = document.getElementById('filter-downtime-date');
+
+    const stationVal = stationSelect ? stationSelect.value : "";
+    const productVal = productSelect ? productSelect.value : "";
+    const dateVal = dateInput ? dateInput.value : "";
+    const hourVal = hourSelect ? hourSelect.value : "";
+
+    let url = `/api/events/export_downtime_excel?camera_id=${stationVal}&product_id=${productVal}`;
+    if (dateVal) url += `&date=${dateVal}`;
+    if (hourVal !== "" && hourVal !== null && hourVal !== undefined) url += `&start_hour=${hourVal}&end_hour=${hourVal}`;
+
+    window.location.href = url;
 }
 
 /* --- LOGIC TRANG THỐNG KÊ --- */

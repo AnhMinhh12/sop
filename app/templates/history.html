@@ -1,75 +1,233 @@
 {% extends "base.html" %}
 
-{% block title %}Lịch sử vi phạm - SOP AI MONITORING{% endblock %}
+{% block title %}Lịch sử hoạt động & Dừng máy - SOP AI MONITORING{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2 class="section-title"><span>HISTORY</span> Lịch sử vi phạm</h2>
-    <div class="filters">
-        <select id="filter-station" class="filter-input" onchange="onStationChange()">
-            <option value="">Tất cả trạm</option>
-            <!-- Sẽ được fill bằng JS -->
-        </select>
-        <select id="filter-product" class="filter-input">
-            <option value="">Tất cả mã</option>
-        </select>
-        <select id="filter-hour" class="filter-input">
-            <option value="">Tất cả giờ</option>
-            <option value="0">00:00 - 01:00</option>
-            <option value="1">01:00 - 02:00</option>
-            <option value="2">02:00 - 03:00</option>
-            <option value="3">03:00 - 04:00</option>
-            <option value="4">04:00 - 05:00</option>
-            <option value="5">05:00 - 06:00</option>
-            <option value="6">06:00 - 07:00</option>
-            <option value="7">07:00 - 08:00</option>
-            <option value="8">08:00 - 09:00</option>
-            <option value="9">09:00 - 10:00</option>
-            <option value="10">10:00 - 11:00</option>
-            <option value="11">11:00 - 12:00</option>
-            <option value="12">12:00 - 13:00</option>
-            <option value="13">13:00 - 14:00</option>
-            <option value="14">14:00 - 15:00</option>
-            <option value="15">15:00 - 16:00</option>
-            <option value="16">16:00 - 17:00</option>
-            <option value="17">17:00 - 18:00</option>
-            <option value="18">18:00 - 19:00</option>
-            <option value="19">19:00 - 20:00</option>
-            <option value="20">20:00 - 21:00</option>
-            <option value="21">21:00 - 22:00</option>
-            <option value="22">22:00 - 23:00</option>
-            <option value="23">23:00 - 00:00</option>
-        </select>
-        <input type="date" id="filter-date" class="filter-input">
-        <button onclick="applyFilters()" class="btn-primary">Tìm kiếm</button>
+<!-- Header & Tab Switcher -->
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+        <h2 class="section-title" style="margin-bottom: 0; white-space: nowrap;">
+            <span>HISTORY</span> Lịch sử hệ thống
+        </h2>
+        <!-- Tab Navigation Buttons -->
+        <div class="history-tab-switcher" style="display: flex; background: #e2e8f0; padding: 4px; border-radius: 12px; gap: 4px;">
+            <button id="tab-btn-violations" onclick="switchHistoryTab('violations')" class="history-tab-btn active" style="padding: 6px 16px; border-radius: 8px; border: none; font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                Lịch sử vi phạm SOP
+            </button>
+            <button id="tab-btn-downtime" onclick="switchHistoryTab('downtime')" class="history-tab-btn" style="padding: 6px 16px; border-radius: 8px; border: none; font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px; background: transparent; color: #64748b;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Lịch sử dừng máy
+            </button>
+        </div>
     </div>
 </div>
 
-<div class="widget" style="margin-top: 20px;">
-    <div class="table-responsive">
-        <table class="event-table full-width">
-            <thead>
-                <tr>
-                    <th>Ngày</th>
-                    <th>Giờ</th>
-                    <th>Mã trạm</th>
-                    <th>Loại vi phạm</th>
-                    <th>Bước dự kiến</th>
-                    <th>Thời lượng</th>
-                    <th>Hành động</th>
-                </tr>
-            </thead>
-            <tbody id="history-list">
-                <tr>
-                    <td colspan="7" style="text-align: center; padding: 40px; color: #888;">
-                        Đang tải dữ liệu...
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+<!-- ==================== TAB 1: LỊCH SỬ VI PHẠM ==================== -->
+<div id="tab-content-violations" class="history-tab-pane">
+    <div class="filters" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #ffffff; padding: 12px 16px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 20px;">
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-station" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Trạm / Máy:</label>
+            <select id="filter-station" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+                <option value="">Tất cả trạm</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-product" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Mã hàng:</label>
+            <select id="filter-product" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+                <option value="">Tất cả mã</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-hour" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Giờ:</label>
+            <select id="filter-hour" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+                <option value="">Tất cả giờ</option>
+                <option value="0">00:00 - 01:00</option>
+                <option value="1">01:00 - 02:00</option>
+                <option value="2">02:00 - 03:00</option>
+                <option value="3">03:00 - 04:00</option>
+                <option value="4">04:00 - 05:00</option>
+                <option value="5">05:00 - 06:00</option>
+                <option value="6">06:00 - 07:00</option>
+                <option value="7">07:00 - 08:00</option>
+                <option value="8">08:00 - 09:00</option>
+                <option value="9">09:00 - 10:00</option>
+                <option value="10">10:00 - 11:00</option>
+                <option value="11">11:00 - 12:00</option>
+                <option value="12">12:00 - 13:00</option>
+                <option value="13">13:00 - 14:00</option>
+                <option value="14">14:00 - 15:00</option>
+                <option value="15">15:00 - 16:00</option>
+                <option value="16">16:00 - 17:00</option>
+                <option value="17">17:00 - 18:00</option>
+                <option value="18">18:00 - 19:00</option>
+                <option value="19">19:00 - 20:00</option>
+                <option value="20">20:00 - 21:00</option>
+                <option value="21">21:00 - 22:00</option>
+                <option value="22">22:00 - 23:00</option>
+                <option value="23">23:00 - 00:00</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-date" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Ngày:</label>
+            <input type="date" id="filter-date" class="filter-input" style="padding: 5px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+        </div>
+        <button onclick="applyFilters()" class="btn-primary" style="padding: 6px 16px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            Tìm kiếm
+        </button>
     </div>
-    <div class="pagination" id="pagination">
-        <!-- Pagination controls -->
+
+    <div class="widget" style="margin-top: 15px;">
+        <div class="table-responsive">
+            <table class="event-table full-width">
+                <thead>
+                    <tr>
+                        <th>Ngày</th>
+                        <th>Giờ</th>
+                        <th>Mã trạm</th>
+                        <th>Mã hàng</th>
+                        <th>Loại vi phạm</th>
+                        <th>Bước dự kiến</th>
+                        <th>Thời lượng</th>
+                        <th>Hành động</th>
+                    </tr>
+                </thead>
+                <tbody id="history-list">
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 40px; color: #888;">
+                            Đang tải dữ liệu vi phạm...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="pagination">
+            <!-- Pagination controls -->
+        </div>
+    </div>
+</div>
+
+<!-- ==================== TAB 2: LỊCH SỬ DỪNG MÁY ==================== -->
+<div id="tab-content-downtime" class="history-tab-pane" style="display: none;">
+    <!-- Stats KPI Cards for Downtime -->
+    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 20px;">
+        <div class="widget stat-card" style="border-left: 4px solid #ea580c; padding: 18px 20px; text-align: left; background: #ffffff;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="widget-title" style="margin-bottom: 4px; font-size: 0.8rem; color: #64748b;">Tổng số lần dừng</div>
+                <div style="background: #ffedd5; color: #ea580c; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                </div>
+            </div>
+            <div class="stat-big-value" id="downtime-kpi-count" style="font-size: 1.8rem; font-weight: 800; color: #ea580c; margin-top: 5px;">0 lần</div>
+        </div>
+
+        <div class="widget stat-card" style="border-left: 4px solid #ef4444; padding: 18px 20px; text-align: left; background: #ffffff;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="widget-title" style="margin-bottom: 4px; font-size: 0.8rem; color: #64748b;">Tổng thời gian dừng</div>
+                <div style="background: #fee2e2; color: #ef4444; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+            </div>
+            <div class="stat-big-value" id="downtime-kpi-total-time" style="font-size: 1.8rem; font-weight: 800; color: #b91c1c; margin-top: 5px;">0p 0s</div>
+        </div>
+
+        <div class="widget stat-card" style="border-left: 4px solid #3b82f6; padding: 18px 20px; text-align: left; background: #ffffff;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="widget-title" style="margin-bottom: 4px; font-size: 0.8rem; color: #64748b;">Thời gian dừng TB / lần</div>
+                <div style="background: #dbeafe; color: #2563eb; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                </div>
+            </div>
+            <div class="stat-big-value" id="downtime-kpi-avg-time" style="font-size: 1.8rem; font-weight: 800; color: #1e40af; margin-top: 5px;">0s</div>
+        </div>
+    </div>
+
+    <!-- Filters for Downtime History -->
+    <div class="filters" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #ffffff; padding: 12px 16px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 20px;">
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-downtime-station" style="font-weight: 700; color: #ea580c; font-size: 0.82rem; white-space: nowrap;">Chọn Máy:</label>
+            <select id="filter-downtime-station" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #fed7aa; background: #fffaf5; font-size: 0.82rem; font-weight: 700; color: #9a3412; cursor: pointer;">
+                <option value="">Tất cả máy</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-downtime-product" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Chọn Mã hàng:</label>
+            <select id="filter-downtime-product" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+                <option value="">Tất cả mã</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-downtime-hour" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Giờ:</label>
+            <select id="filter-downtime-hour" class="filter-input" style="padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+                <option value="">Tất cả giờ</option>
+                <option value="0">00:00 - 01:00</option>
+                <option value="1">01:00 - 02:00</option>
+                <option value="2">02:00 - 03:00</option>
+                <option value="3">03:00 - 04:00</option>
+                <option value="4">04:00 - 05:00</option>
+                <option value="5">05:00 - 06:00</option>
+                <option value="6">06:00 - 07:00</option>
+                <option value="7">07:00 - 08:00</option>
+                <option value="8">08:00 - 09:00</option>
+                <option value="9">09:00 - 10:00</option>
+                <option value="10">10:00 - 11:00</option>
+                <option value="11">11:00 - 12:00</option>
+                <option value="12">12:00 - 13:00</option>
+                <option value="13">13:00 - 14:00</option>
+                <option value="14">14:00 - 15:00</option>
+                <option value="15">15:00 - 16:00</option>
+                <option value="16">16:00 - 17:00</option>
+                <option value="17">17:00 - 18:00</option>
+                <option value="18">18:00 - 19:00</option>
+                <option value="19">19:00 - 20:00</option>
+                <option value="20">20:00 - 21:00</option>
+                <option value="21">21:00 - 22:00</option>
+                <option value="22">22:00 - 23:00</option>
+                <option value="23">23:00 - 00:00</option>
+            </select>
+        </div>
+        <div class="filter-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="filter-downtime-date" style="font-weight: 700; color: #475569; font-size: 0.82rem; white-space: nowrap;">Ngày:</label>
+            <input type="date" id="filter-downtime-date" class="filter-input" style="padding: 5px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 0.82rem; font-weight: 600; color: #1e293b; cursor: pointer;">
+        </div>
+        <button onclick="applyDowntimeFilters()" class="btn-primary" style="background: #ea580c; border-color: #ea580c; padding: 6px 16px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            Tìm kiếm
+        </button>
+        <button onclick="exportDowntimeExcel()" style="display: flex; align-items: center; gap: 5px; background: #10b981; color: #ffffff; padding: 6px 14px; border-radius: 8px; border: none; font-size: 0.82rem; font-weight: 700; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-left: auto;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+            Xuất Excel Dừng Máy
+        </button>
+    </div>
+
+    <!-- Downtime Records Table -->
+    <div class="widget" style="margin-top: 15px;">
+        <div class="table-responsive">
+            <table class="event-table full-width">
+                <thead>
+                    <tr>
+                        <th>Ngày</th>
+                        <th>Thời điểm bắt đầu</th>
+                        <th>Máy / Trạm</th>
+                        <th>Mã sản phẩm</th>
+                        <th>Nguyên nhân / Vị trí</th>
+                        <th>Thời lượng dừng</th>
+                        <th>Trạng thái</th>
+                    </tr>
+                </thead>
+                <tbody id="downtime-history-list">
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 40px; color: #888;">
+                            Đang tải dữ liệu dừng máy...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="downtime-pagination">
+            <!-- Downtime Pagination controls -->
+        </div>
     </div>
 </div>
 {% endblock %}
