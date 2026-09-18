@@ -459,7 +459,7 @@ async function loadDowntimeHistory(stationId = '', productId = '', date = '', ho
     const paginationContainer = document.getElementById('downtime-pagination');
     if (!list) return;
 
-    list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu dừng máy...</td></tr>';
+    list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Đang tải dữ liệu dừng máy...</td></tr>';
 
     let url = `/api/events?event_type=downtime&page=${page}&limit=${downtimeItemsPerPage}&days=15`;
     if (stationId) url += `&camera_id=${stationId}`;
@@ -488,7 +488,7 @@ async function loadDowntimeHistory(stationId = '', productId = '', date = '', ho
         list.innerHTML = '';
 
         if (events.length === 0) {
-            list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi dừng máy nào</td></tr>';
+            list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Không tìm thấy bản ghi dừng máy nào</td></tr>';
             if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
@@ -532,6 +532,9 @@ async function loadDowntimeHistory(stationId = '', productId = '', date = '', ho
                         Đã kết thúc
                     </span>
                 </td>
+                <td>
+                    ${ev.clip_path ? `<button class="btn-action" style="background:#ea580c;" onclick="openVideo('${ev.id}', '${ev.station_id || ev.camera_id}', 'Dừng máy (${durationFormatted})')">▶ XEM LẠI</button>` : '<span class="text-xs text-slate-400">Không có video</span>'}
+                </td>
             `;
             list.appendChild(row);
         });
@@ -540,7 +543,7 @@ async function loadDowntimeHistory(stationId = '', productId = '', date = '', ho
 
     } catch (err) {
         console.error("Error loading downtime history:", err);
-        list.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu dừng máy</td></tr>';
+        list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #888;">Lỗi nạp dữ liệu dừng máy</td></tr>';
     }
 }
 

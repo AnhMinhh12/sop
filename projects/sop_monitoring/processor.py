@@ -79,6 +79,13 @@ class FrameProcessor:
         self.audio_alert = audio_alert
         self.clip_saver = clip_saver
 
+        # Bộ ghi hình 2 phút đầu tiên tính từ lúc bắt đầu dừng máy (Downtime)
+        from shared.events.clip_saver import DowntimeRecorder
+        out_dir = getattr(self.clip_saver, "output_dir", None) or os.getenv("VIOLATIONS_DIR", "data/violations")
+        self.downtime_recorder = DowntimeRecorder(self.cam_id, output_dir=out_dir, fps=self.fps, max_seconds=120)
+        self._was_machine_stopped = False
+        self._current_downtime_clip = None
+
         self.running = False
         self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
         self.current_processed_frame = None
@@ -193,8 +200,18 @@ class FrameProcessor:
             if getattr(self.engine, "last_downtime_event", None):
                 downtime_ev = self.engine.last_downtime_event
                 self.engine.last_downtime_event = None
+                self._was_machine_stopped = False
+
+                # Dừng recorder nếu còn đang ghi và chốt đường dẫn clip
+                clip_path = self.downtime_recorder.stop() or self._current_downtime_clip or ""
+                self._current_downtime_clip = None
+
                 try:
                     dur = downtime_ev.get("duration", 0.0)
+                    start_ts = downtime_ev.get("start_time")
+                    start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts)) if start_ts else None
+                    valid_clip = clip_path if (clip_path and os.path.exists(clip_path)) else ""
+
                     EventQueries.log_event(
                         camera_id=self.cam_id,
                         violation_type="machine_stop",
@@ -202,10 +219,11 @@ class FrameProcessor:
                         expected_step="Bước 1: Robot lấy 2 SP",
                         sop_status="machine_stop",
                         confidence=1.0,
-                        clip_path="",
-                        duration=dur
+                        clip_path=valid_clip,
+                        duration=dur,
+                        timestamp=start_time_str
                     )
-                    logger.info(f"FrameProcessor [{self.cam_id}]: Logged machine stop event (duration={dur}s)")
+                    logger.info(f"FrameProcessor [{self.cam_id}]: Logged machine stop event with clip '{valid_clip}' (duration={dur}s)")
                 except Exception as e:
                     logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
 
@@ -213,6 +231,21 @@ class FrameProcessor:
             is_completed = self.latest_status.get("sop_status") == "completed"
             is_violation = self.latest_status.get("sop_status") == "violation"
             is_stopped = self.latest_status.get("is_machine_stopped", False)
+
+            # Theo dõi dừng máy: Ghi hình 2 phút đầu tiên tính từ lúc bắt đầu dừng máy
+            if is_stopped:
+                if not self._was_machine_stopped:
+                    self._was_machine_stopped = True
+                    self._current_downtime_clip = self.downtime_recorder.start(start_time=time.time())
+                if self.downtime_recorder.is_recording:
+                    self.downtime_recorder.push_frame(frame)
+            else:
+                # Nếu không còn dừng máy nhưng cờ vẫn bật, đảm bảo reset
+                if self._was_machine_stopped and not getattr(self.engine, "last_downtime_event", None):
+                    self._was_machine_stopped = False
+                    self.downtime_recorder.stop()
+                    self._current_downtime_clip = None
+
             step_changed = False
             curr_idx = self.engine.current_step_idx if hasattr(self.engine, 'current_step_idx') else -1
             if curr_idx != self.last_step_idx:
@@ -450,5 +483,10 @@ class FrameProcessor:
     def get_latest_frame(self): return self.current_processed_frame
     def stop(self):
         self.running = False
+        if hasattr(self, 'downtime_recorder') and self.downtime_recorder.is_recording:
+            try:
+                self.downtime_recorder.stop()
+            except Exception:
+                pass
         self.stream.stop()
         if self.thread: self.thread.join()

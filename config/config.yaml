@@ -109,7 +109,7 @@ storage:
   clip_post_seconds: 5
   max_disk_usage_percent: 85
   min_free_gb: 50
-  retention_days: 30  # Lưu video trong vòng 30 ngày (1 tháng)
+  retention_days: 15  # Lưu video trong vòng 15 ngày
 
 logging:
   level: "INFO"

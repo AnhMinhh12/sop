@@ -99,7 +99,11 @@
 
         // Set content
         title.innerText = type;
-        document.getElementById('modal-subtitle').innerText = `Trạm: ${station} • Violation Replay`;
+        if (type && type.includes('Dừng máy')) {
+            document.getElementById('modal-subtitle').innerText = `Trạm: ${station} • Replay dừng máy (2 phút đầu)`;
+        } else {
+            document.getElementById('modal-subtitle').innerText = `Trạm: ${station} • Violation Replay`;
+        }
         source.src = `/clip/${id}`;
         download.href = `/clip/${id}`;
         

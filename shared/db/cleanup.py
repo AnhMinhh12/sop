@@ -14,7 +14,7 @@ class StorageCleanup:
     """
 
     def __init__(self, violations_dir: str, max_usage_percent: float = 85.0, 
-                 check_interval_min: int = 10, retention_days: int = 30):
+                 check_interval_min: int = 10, retention_days: int = 15):
         self.violations_dir = violations_dir
         self.max_usage = max_usage_percent
         self.retention_days = retention_days
@@ -37,20 +37,22 @@ class StorageCleanup:
         """Background worker loop."""
         while self.running:
             try:
-                # 1. Xóa theo thời gian (Hết hạn 30 ngày)
+                # 1. Xóa theo thời gian (Hết hạn 15 ngày)
                 self._cleanup_by_time()
-                
-                # 2. Xóa theo dung lượng (Nếu ổ cứng đầy)
+
+                # 2. Xóa theo dung lượng ổ cứng (nếu vượt ngưỡng max_usage)
                 self._check_and_cleanup()
 
-                # 3. Xóa nội dung spatial_debug.txt (Mỗi 10p)
-                self._clear_debug_logs()
+                # 3. Dọn dẹp spatial_debug.txt nếu phình to
+                self._cleanup_debug_logs()
+
             except Exception as e:
-                logger.error(f"StorageCleanup: Error in worker: {e}")
+                logger.error(f"StorageCleanup: Unexpected error in worker: {e}")
+
             time.sleep(self.interval)
 
-    def _clear_debug_logs(self):
-        """Clears the content of spatial_debug.txt to save space."""
+    def _cleanup_debug_logs(self):
+        """Xóa file log spatial_debug.txt nếu nó quá 50MB để tránh đầy ổ cứng."""
         debug_file = "data/logs/spatial_debug.txt"
         if os.path.exists(debug_file):
             try:
@@ -67,7 +69,7 @@ class StorageCleanup:
         try:
             # MySQL syntax to find records older than N days
             cursor.execute(f"""
-                SELECT id, file_path FROM sop_clips 
+                SELECT id, event_id, file_path FROM sop_clips 
                 WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
             """, (self.retention_days,))
             
@@ -80,6 +82,7 @@ class StorageCleanup:
             for clip in clips:
                 clip_id = clip["id"]
                 file_path = clip["file_path"]
+                ev_id = clip.get("event_id")
 
                 # Xóa file vật lý
                 if file_path and os.path.exists(file_path):
@@ -88,8 +91,10 @@ class StorageCleanup:
                     except Exception as e:
                         logger.error(f"Could not delete file {file_path}: {e}")
 
-                # Xóa bản ghi trong DB
+                # Xóa bản ghi trong DB và reset clip_path trong sop_events
                 cursor.execute("DELETE FROM sop_clips WHERE id = %s", (clip_id,))
+                if ev_id:
+                    cursor.execute("UPDATE sop_events SET clip_path = NULL WHERE id = %s", (ev_id,))
             
             conn.commit()
             logger.info(f"StorageCleanup: Cleaned up {len(clips)} expired clips.")

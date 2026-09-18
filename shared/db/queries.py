@@ -41,7 +41,8 @@ class EventQueries:
                   sop_status: str = "violation",
                   confidence: float = 0.0,
                   clip_path: str = "",
-                  duration: Optional[float] = None) -> Optional[int]:
+                  duration: Optional[float] = None,
+                  timestamp: Optional[str] = None) -> Optional[int]:
         """
         Ghi nhận một sự kiện vi phạm vào sop_events.
         Trả về event_id nếu thành công, None nếu lỗi.
@@ -52,7 +53,7 @@ class EventQueries:
             return None
             
         cursor = conn.cursor()
-        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        event_timestamp = timestamp or time.strftime('%Y-%m-%d %H:%M:%S')
 
         try:
             # Tìm camera_id (INT) và definition_id (Mã hàng hiện tại) từ station_id
@@ -77,7 +78,7 @@ class EventQueries:
                     confidence, clip_path, duration
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                cam_db_id, def_db_id, timestamp, violation_type,
+                cam_db_id, def_db_id, event_timestamp, violation_type,
                 step_detected or "N/A", expected_step,
                 sop_status, confidence, clip_path, duration
             ))
