@@ -93,24 +93,17 @@ class BaseEngine(ABC):
         w, h = self.config.get("w", 640), self.config.get("h", 480)
         for obj in objects:
             centroid = obj.get("centroid")
+            bbox = obj.get("bbox", [])
             if not centroid:
-                bbox = obj.get("bbox", [])
                 if len(bbox) >= 4:
                     centroid = [(bbox[0] + bbox[2]) / 2 / w, (bbox[1] + bbox[3]) / 2 / h]
             if not centroid:
                 continue
-            test_points = [centroid]
-            if not centroid_only:
-                bbox = obj.get("bbox", [])
-                if len(bbox) >= 4:
-                    test_points = [
-                        centroid,
-                        [bbox[0] / w, bbox[1] / h],
-                        [bbox[2] / w, bbox[1] / h],
-                        [bbox[0] / w, bbox[3] / h],
-                        [bbox[2] / w, bbox[3] / h],
-                    ]
-            if any(cv2.pointPolygonTest(poly, (p[0], p[1]), False) >= 0 for p in test_points):
+            if len(bbox) >= 4 and self._check_bbox_polygon_intersection(
+                bbox, zone_pts, centroid, w, h, centroid_only
+            ):
+                return True
+            if cv2.pointPolygonTest(poly, (centroid[0], centroid[1]), False) >= 0:
                 return True
         return False
 
@@ -178,4 +171,3 @@ class BaseEngine(ABC):
                     return True
                     
         return False
-

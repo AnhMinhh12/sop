@@ -110,6 +110,30 @@ class EventQueries:
             conn.close()
 
     @staticmethod
+    def update_downtime_event(event_id: int, duration: float, clip_path: str = "") -> bool:
+        """Chốt thời lượng và clip cho bản ghi dừng máy đã tạo lúc bắt đầu dừng."""
+        conn = db.get_connection()
+        if conn is None:
+            logger.error("DB: Connection lost. Skipping downtime update.")
+            return False
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """UPDATE sop_events
+                   SET duration = %s, step_detected = %s, clip_path = %s
+                   WHERE id = %s""",
+                (duration, f"Dừng máy {int(duration)}s (Robot > 5p)", clip_path, event_id)
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+        except Exception as e:
+            logger.error(f"DB Error updating downtime event {event_id}: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
     def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
         """
         Truy vấn danh sách các vi phạm gần đây nhất từ sop_events.

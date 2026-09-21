@@ -85,6 +85,9 @@ class FrameProcessor:
         self.downtime_recorder = DowntimeRecorder(self.cam_id, output_dir=out_dir, fps=self.fps, max_seconds=120)
         self._was_machine_stopped = False
         self._current_downtime_clip = None
+        self._active_downtime_event_id = None
+        self._downtime_started_at = 0.0
+        self._last_downtime_db_update = 0.0
 
         self.running = False
         self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
@@ -120,6 +123,9 @@ class FrameProcessor:
             # Frame đã được resize trong RTSPStream — KHÔNG resize lại ở đây
             self._target_w = frame.shape[1]
             self._target_h = frame.shape[0]
+            if hasattr(self.engine, "config"):
+                self.engine.config["w"] = self._target_w
+                self.engine.config["h"] = self._target_h
 
             # Push frame gốc vào ring buffer (deque tự quản lý bộ nhớ)
             self.ring_buffer.push(frame)
@@ -212,18 +218,24 @@ class FrameProcessor:
                     start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts)) if start_ts else None
                     valid_clip = clip_path if (clip_path and os.path.exists(clip_path)) else ""
 
-                    EventQueries.log_event(
-                        camera_id=self.cam_id,
-                        violation_type="machine_stop",
-                        step_detected=f"Dừng máy {int(dur)}s (Robot > 5p)",
-                        expected_step="Bước 1: Robot lấy 2 SP",
-                        sop_status="machine_stop",
-                        confidence=1.0,
-                        clip_path=valid_clip,
-                        duration=dur,
-                        timestamp=start_time_str
-                    )
-                    logger.info(f"FrameProcessor [{self.cam_id}]: Logged machine stop event with clip '{valid_clip}' (duration={dur}s)")
+                    if self._active_downtime_event_id:
+                        EventQueries.update_downtime_event(
+                            self._active_downtime_event_id, dur, valid_clip
+                        )
+                        logger.info(f"FrameProcessor [{self.cam_id}]: Closed downtime event {self._active_downtime_event_id} (duration={dur}s)")
+                    else:
+                        EventQueries.log_event(
+                            camera_id=self.cam_id,
+                            violation_type="machine_stop",
+                            step_detected=f"Dừng máy {int(dur)}s (Robot > 5p)",
+                            expected_step="Bước 1: Robot lấy 2 SP",
+                            sop_status="machine_stop",
+                            confidence=1.0,
+                            clip_path=valid_clip,
+                            duration=dur,
+                            timestamp=start_time_str
+                        )
+                    self._active_downtime_event_id = None
                 except Exception as e:
                     logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
 
@@ -237,6 +249,28 @@ class FrameProcessor:
                 if not self._was_machine_stopped:
                     self._was_machine_stopped = True
                     self._current_downtime_clip = self.downtime_recorder.start(start_time=time.time())
+                    start_ts = getattr(self.engine, "step_1_wait_start_time", 0.0) or time.time()
+                    self._downtime_started_at = start_ts
+                    self._last_downtime_db_update = time.time()
+                    self._active_downtime_event_id = EventQueries.log_event(
+                        camera_id=self.cam_id,
+                        violation_type="machine_stop",
+                        step_detected="Dừng máy - đang diễn ra (Robot > 5p)",
+                        expected_step="Bước 1: Robot lấy 2 SP",
+                        sop_status="machine_stop",
+                        confidence=1.0,
+                        duration=0.0,
+                        timestamp=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts))
+                    )
+                # Cập nhật định kỳ để lịch sử/thống kê phản ánh cả đợt dừng đang diễn ra.
+                now_ts = time.time()
+                if (self._active_downtime_event_id and
+                        now_ts - self._last_downtime_db_update >= 15.0):
+                    EventQueries.update_downtime_event(
+                        self._active_downtime_event_id,
+                        now_ts - self._downtime_started_at
+                    )
+                    self._last_downtime_db_update = now_ts
                 if self.downtime_recorder.is_recording:
                     self.downtime_recorder.push_frame(frame)
             else:
