@@ -25,6 +25,9 @@ products:
   - id: "639957"
     name: "639957"
     sop_file: "projects/sop_monitoring/config/639957.yaml"
+  - id: "KOR-H2110"
+    name: "KOR-H2110"
+    sop_file: "projects/sop_monitoring/config/KOR-H2110.yaml"
 
 inference:
   device: "cpu"
@@ -79,6 +82,19 @@ cameras:
       - "TFF4040"
       - "626287"
     yolo_model: "shared/models/yolo/TFF4040_FINAL2.onnx"
+    resolution: [640, 480]
+    fps_cap: 15
+    conf_threshold: 0.35
+
+  - id: "machine_09"
+    name: "Máy 9"
+    illustration: "/static/illustration/may9.jpg"
+    rtsp_url: "rtsp://admin:Htmp%402019@10.0.9.72:554/Streaming/Channels/102"
+    sop_file: "projects/sop_monitoring/config/KOR-H2110.yaml"
+    engine_id: "KOR-H2110"
+    allowed_products:
+      - "KOR-H2110"
+    yolo_model: "shared/models/yolo/KOR-H2110.onnx"
     resolution: [640, 480]
     fps_cap: 15
     conf_threshold: 0.35

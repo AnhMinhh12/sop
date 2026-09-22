@@ -1,23 +1,23 @@
 """
-Train YOLOv8 trên Google Colab — phiên bản v2 cho 639957
-=========================================================
+Train YOLOv11 trên Google Colab — KOR-H2110
+============================================
 Cải tiến so với bản cũ:
   - Tự động nhận diện cấu trúc dataset giải nén từ Roboflow/Google Drive
   - Cập nhật tự động path trong data.yaml tránh lỗi đường dẫn
   - Augmentation mạnh hơn để xử lý class ít data (sp, robot)
   - Copy-paste, mosaic, mixup tăng để tăng tỉ lệ positive sample
-  - Close mosaic ở 80% epoch (YOLOv8 mặc định)
-  - Export ONNX + rename thành 639957.onnx
+  - Close mosaic ở 20 epoch cuối
+  - Export ONNX + rename theo PRODUCT_CODE
   - Verify lại model với dummy inference
 
 Cách dùng:
-  1. Upload folder/zip dataset YOLO lên Google Drive (MyDrive/639957.v1-28-8-2026.yolov8.zip hoặc folder 639957.v1-28-8-2026.yolov8)
+  1. Upload file KOR- H2110.v1i.yolov11.zip (hoặc thư mục cùng tên) lên MyDrive.
   2. Mở Colab → Runtime > Change runtime type > T4 GPU
   3. Copy toàn bộ nội dung file này → paste vào 1 cell → Run (Shift+Enter)
-  4. Sau khi train xong, tải file 639957.onnx về thư mục shared/models/yolo/
+  4. Sau khi train xong, tải file KOR-H2110.onnx về thư mục shared/models/yolo/.
 
-Dataset YOLOv8 cần có cấu trúc:
-  639957.v1-28-8-2026.yolov8/
+Dataset YOLOv11 cần có cấu trúc:
+  KOR- H2110.v1i.yolov11/
   ├── data.yaml
   ├── train/images/*.jpg
   ├── train/labels/*.txt
@@ -30,25 +30,27 @@ import shutil
 import subprocess
 from pathlib import Path
 
-# ==== CẤU HÌNH - ĐÃ CẬP NHẬT THEO DATASET MỚI ====
-DRIVE_DATASET_ZIP = "/content/drive/MyDrive/639957.v1-28-8-2026.yolov8.zip"
-DRIVE_DATASET_DIR = "/content/639957.v1-28-8-2026.yolov8"
+# ==== CẤU HÌNH DATASET / MODEL ====
+DATASET_NAME = "KOR- H2110.v1i.yolov11"
+PRODUCT_CODE = "KOR-H2110"
+DRIVE_DATASET_ZIP = f"/content/drive/MyDrive/{DATASET_NAME}.zip"
+DRIVE_DATASET_DIR = f"/content/{DATASET_NAME}"
 DATA_YAML = os.path.join(DRIVE_DATASET_DIR, "data.yaml")
 DRIVE_PROJECT_DIR = "/content/drive/MyDrive/yolo_runs"
 
-# Có thể tăng lên yolov8s/m để model mạnh hơn (chậm hơn ~3x)
-MODEL_SIZE = "yolov8n.pt"
+# Có thể đổi thành yolo11s.pt/yolo11m.pt nếu cần chính xác hơn và GPU đủ mạnh.
+MODEL_SIZE = "yolo11n.pt"
 
 # Epochs: với ~800-1500 ảnh, 100-150 epochs là đủ
-# YOLOv8 sẽ tự early-stop nếu không cải thiện sau PATIENCE epoch
+# YOLOv11 sẽ tự early-stop nếu không cải thiện sau PATIENCE epoch
 EPOCHS = 150
 IMG_SIZE = 640
-BATCH_SIZE = 16  # Colab T4 VRAM 16GB, batch 16 ổn với yolov8n/s
+BATCH_SIZE = 16  # Colab T4 VRAM 16GB, batch 16 ổn với yolo11n/s
 PATIENCE = 30    # Tăng patience vì class ít data sẽ dao động
 WORKERS = 2
 
-PROJECT_NAME = "639957_yolov8"
-RUN_NAME = "exp_v1"
+PROJECT_NAME = f"{PRODUCT_CODE}_yolov11"
+RUN_NAME = "v1"
 
 os.makedirs(DRIVE_PROJECT_DIR, exist_ok=True)
 
@@ -110,18 +112,40 @@ print("\n" + "=" * 60)
 print("4) CHUẨN BỊ DATASET")
 print("=" * 60)
 
-# 4.1) Giải nén file zip hoặc sao chép thư mục từ Drive sang local Colab (/content/639957.v1-28-8-2026.yolov8)
-# Việc giải nén trên ổ SSD cục bộ của Colab giúp tăng tốc độ train gấp nhiều lần và tránh ô nhiễm Google Drive
-# 4.1) Giải nén file zip hoặc sao chép thư mục từ Drive sang local Colab (/content/639957.v1-28-8-2026.yolov8)
+# 4.1) Giải nén file zip hoặc sao chép thư mục từ Drive sang local Colab.
+# Việc giải nén trên SSD cục bộ của Colab giúp train nhanh hơn Google Drive.
 # Kiểm tra file zip hoặc thư mục trong MyDrive với nhiều tên/phân cấp khác nhau
 found_zip = None
+local_dataset_zip = Path(f"/content/{DATASET_NAME}.zip")
 if os.path.exists(DRIVE_DATASET_ZIP):
     found_zip = DRIVE_DATASET_ZIP
-elif os.path.exists("/content/drive/MyDrive/"):
-    zip_matches = list(Path("/content/drive/MyDrive/").glob("*639957*.zip"))
+elif local_dataset_zip.exists():
+    # Hỗ trợ upload zip trực tiếp vào Files của Colab, không cần qua Drive.
+    found_zip = str(local_dataset_zip)
+else:
+    # Tên file trên Drive đôi khi có khoảng trắng/ký tự khác với tên project.
+    # Dò toàn bộ zip và so sánh tên sau khi bỏ khoảng trắng, '-' và '_'.
+    zip_candidates = []
+    for root in (Path("/content/drive/MyDrive"), Path("/content")):
+        if root.exists():
+            zip_candidates.extend(root.rglob("*.zip"))
+    zip_candidates = list(dict.fromkeys(zip_candidates))
+
+    def normalized_name(value):
+        return "".join(ch for ch in value.lower() if ch.isalnum())
+
+    expected_name = normalized_name(DATASET_NAME)
+    zip_matches = [p for p in zip_candidates if expected_name in normalized_name(p.stem)]
     if zip_matches:
         found_zip = str(zip_matches[0])
-        print(f"✅ Tự động tìm thấy file zip trên Drive: {found_zip}")
+        print(f"✅ Tự động tìm thấy file zip: {found_zip}")
+    elif len(zip_candidates) == 1:
+        found_zip = str(zip_candidates[0])
+        print(f"⚠️ Dùng file zip duy nhất tìm thấy: {found_zip}")
+    elif zip_candidates:
+        print("⚠️ Có nhiều file zip, không xác định được dataset:")
+        for candidate in zip_candidates:
+            print(f"   - {candidate}")
 
 if found_zip:
     print(f"- Giải nén {found_zip} vào {DRIVE_DATASET_DIR} ...")
@@ -129,9 +153,9 @@ if found_zip:
     print("- Giải nén xong.")
 else:
     # Nếu không có zip, tìm thư mục trên Drive
-    drive_folder = "/content/drive/MyDrive/639957.v1-28-8-2026.yolov8"
+    drive_folder = f"/content/drive/MyDrive/{DATASET_NAME}"
     if not os.path.exists(drive_folder) and os.path.exists("/content/drive/MyDrive/"):
-        folder_matches = [p for p in Path("/content/drive/MyDrive/").rglob("*639957*") if p.is_dir()]
+        folder_matches = [p for p in Path("/content/drive/MyDrive/").rglob(f"*{PRODUCT_CODE}*") if p.is_dir()]
         if folder_matches:
             drive_folder = str(folder_matches[0])
             print(f"✅ Tự động tìm thấy thư mục dataset trên Drive: {drive_folder}")
@@ -141,20 +165,33 @@ else:
         sh(f"cp -r '{drive_folder}' '{DRIVE_DATASET_DIR}'")
         print("- Copy xong.")
 
-# 4.2) Tự động phát hiện vị trí chính xác của data.yaml (bao gồm cả trường hợp unzip tạo thêm 1 thư mục con)
+# 4.2) Tự động phát hiện vị trí chính xác của data.yaml (bao gồm cả trường hợp
+# dataset được đặt trong một thư mục con bất kỳ của MyDrive hoặc unzip tạo thêm
+# một thư mục con).
 if not os.path.exists(DATA_YAML):
     print(f"🔍 Đang tìm kiếm file data.yaml/data.yml trong {DRIVE_DATASET_DIR} và /content/...")
     search_paths = (
         list(Path(DRIVE_DATASET_DIR).rglob("data.yaml")) + 
         list(Path(DRIVE_DATASET_DIR).rglob("data.yml")) +
-        list(Path("/content/").glob("**/639957*/**/data.yaml")) +
-        list(Path("/content/").glob("**/639957*/**/data.yml"))
+        list(Path("/content/").glob(f"**/{PRODUCT_CODE}*/**/data.yaml")) +
+        list(Path("/content/").glob(f"**/{PRODUCT_CODE}*/**/data.yml"))
     )
     if not search_paths and os.path.exists("/content/drive/MyDrive/"):
         search_paths = (
-            list(Path("/content/drive/MyDrive/").glob("**/*639957*/**/data.yaml")) +
-            list(Path("/content/drive/MyDrive/").glob("**/*639957*/**/data.yml"))
+            list(Path("/content/drive/MyDrive/").glob(f"**/*{PRODUCT_CODE}*/**/data.yaml")) +
+            list(Path("/content/drive/MyDrive/").glob(f"**/*{PRODUCT_CODE}*/**/data.yml"))
         )
+    # Tên thư mục do Roboflow/Drive có thể bị đổi. Nếu chưa tìm thấy theo tên
+    # KOR-H2110, lấy data.yaml duy nhất trong MyDrive hoặc /content.
+    if not search_paths:
+        broad_paths = []
+        for root in (Path("/content"), Path("/content/drive/MyDrive")):
+            if root.exists():
+                broad_paths.extend(root.rglob("data.yaml"))
+                broad_paths.extend(root.rglob("data.yml"))
+        # Bỏ data.yaml do các package/system tạo ra; chỉ giữ dataset có train/valid/test cạnh bên.
+        search_paths = [p for p in broad_paths if any((p.parent / split).exists()
+                        for split in ("train", "valid", "test"))]
     
     if search_paths:
         actual_yaml = str(search_paths[0])
@@ -163,11 +200,12 @@ if not os.path.exists(DATA_YAML):
         DRIVE_DATASET_DIR = str(Path(actual_yaml).parent)
     else:
         print(f"❌ Không tìm thấy data.yaml tại {DATA_YAML}")
-        print("📂 Danh sách file trong Google Drive (MyDrive):")
-        sh("ls -la /content/drive/MyDrive/")
-        print("📂 Danh sách file trong /content/:")
-        sh("ls -la /content/")
-        raise FileNotFoundError("Không tìm thấy data.yaml trong thư mục dataset. Vui lòng kiểm tra lại tên file zip/folder đã upload lên Google Drive.")
+        print("📂 File zip/dataset tìm thấy trong MyDrive:")
+        sh("find /content/drive/MyDrive -maxdepth 4 \\( -iname '*.zip' -o -iname 'data.yaml' -o -iname 'data.yml' \\) -print 2>/dev/null | head -100")
+        raise FileNotFoundError(
+            "Không tìm thấy data.yaml. Hãy upload file KOR-H2110.v1.yolov11.zip "
+            "hoặc cả thư mục dataset (có data.yaml, train/, valid/, test/) vào MyDrive rồi chạy lại."
+        )
 
 # Cập nhật đường dẫn tuyệt đối
 DRIVE_DATASET_DIR = os.path.abspath(DRIVE_DATASET_DIR)
@@ -264,7 +302,7 @@ for cls_id in sorted(class_names_map.keys()):
 
 
 # =====================================================================
-# 5) TRAIN với augmentation mạnh
+# 5) TRAIN YOLOv11 với augmentation mạnh
 # =====================================================================
 print("\n" + "=" * 60)
 print(f"5) TRAIN - {EPOCHS} epochs, batch={BATCH_SIZE}, imgsz={IMG_SIZE}")
@@ -334,7 +372,7 @@ print(f"  Recall     : {metrics.box.mr:.4f}")
 
 
 # =====================================================================
-# 7) EXPORT ONNX (Output name: 639957.onnx)
+# 7) EXPORT ONNX
 # =====================================================================
 print("\n" + "=" * 60)
 print("7) EXPORT ONNX")
@@ -352,9 +390,9 @@ model.export(
     dynamic=False,
 )
 
-# Di chuyển và đổi tên thành 639957.onnx
+# Di chuyển và đổi tên theo PRODUCT_CODE
 best_onnx_source = best_weights.replace(".pt", ".onnx")
-onnx_path = os.path.join(EXPORT_DIR, "639957.onnx")
+onnx_path = os.path.join(EXPORT_DIR, f"{PRODUCT_CODE}.onnx")
 
 if os.path.exists(best_onnx_source):
     shutil.copy2(best_onnx_source, onnx_path)
@@ -424,20 +462,20 @@ print("\n" + "=" * 60)
 print("10) BACKUP AN TOÀN")
 print("=" * 60)
 
-SAFE_DIR = "/content/drive/MyDrive/yolo_safe_backup_v2"
+SAFE_DIR = "/content/drive/MyDrive/yolo11_safe_backup"
 os.makedirs(SAFE_DIR, exist_ok=True)
 
 # Copy PT weights
 for f in ["best.pt", "last.pt"]:
     src = os.path.join(DRIVE_PROJECT_DIR, PROJECT_NAME, RUN_NAME, "weights", f)
     if os.path.exists(src):
-        dst = os.path.join(SAFE_DIR, f"639957_{f}")
+        dst = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}_{f}")
         shutil.copy2(src, dst)
         print(f"  Backup PyTorch model → {dst}")
 
-# Copy 639957.onnx
+# Copy model ONNX
 if os.path.exists(onnx_path):
-    dst_onnx = os.path.join(SAFE_DIR, "639957.onnx")
+    dst_onnx = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}.onnx")
     shutil.copy2(onnx_path, dst_onnx)
     print(f"  Backup ONNX model → {dst_onnx}")
 
@@ -451,14 +489,14 @@ print("\n" + "=" * 60)
 print("✅ HOÀN TẤT")
 print("=" * 60)
 
-final_onnx = os.path.join(SAFE_DIR, "639957.onnx")
-final_pt = os.path.join(SAFE_DIR, "639957_best.pt")
+final_onnx = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}.onnx")
+final_pt = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}_best.pt")
 
 print(f"""
 📁 FILES CẦN TẢI VỀ (từ Google Drive của bạn):
 
    1. {final_onnx}
-      ← File model ONNX dùng để chạy deploy thực tế (đầu ra: 639957.onnx)
+      ← File model ONNX dùng để chạy deploy thực tế
 
    2. {final_pt}
       ← File model PyTorch gốc để lưu trữ / retrain sau này nếu cần
@@ -469,9 +507,8 @@ print(f"""
 
    1. Truy cập Google Drive cá nhân.
    2. Tìm thư mục: yolo_safe_backup_v2/
-   3. Tải file "639957.onnx" và "639957_best.pt" về máy.
-   4. Copy file "639957.onnx" vào dự án local tại đường dẫn:
-      shared/models/yolo/639957.onnx (hoặc cập nhật config.yaml trỏ tới tên file này)
+   3. Tải file ONNX và best.pt về máy.
+   4. Copy file ONNX vào shared/models/yolo/ và cập nhật config.yaml trỏ tới tên file này.
 """)
 
 # Xác minh file thực sự có mặt trong backup

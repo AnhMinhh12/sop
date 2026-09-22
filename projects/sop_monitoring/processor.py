@@ -216,7 +216,12 @@ class FrameProcessor:
                     dur = downtime_ev.get("duration", 0.0)
                     start_ts = downtime_ev.get("start_time")
                     start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts)) if start_ts else None
-                    valid_clip = clip_path if (clip_path and os.path.exists(clip_path)) else ""
+                    # Lưu đường dẫn recorder đã tạo ngay cả khi FFmpeg còn đang chốt
+                    # container MP4. Kiểm tra exists ở thời điểm này gây race condition:
+                    # file xuất hiện vài giây sau nhưng lịch sử đã bị lưu clip_path rỗng.
+                    valid_clip = clip_path or ""
+                    if valid_clip and not os.path.exists(valid_clip):
+                        logger.warning(f"FrameProcessor [{self.cam_id}]: Downtime clip is still finalizing: {valid_clip}")
 
                     if self._active_downtime_event_id:
                         EventQueries.update_downtime_event(

@@ -157,8 +157,14 @@ class DowntimeRecorder:
         if self._queue is not None:
             self._queue.put(None)
         if self._thread is not None:
-            self._thread.join(timeout=3.0)
+            # FFmpeg cần thời gian đóng container MP4. Không chốt sự kiện trước khi
+            # worker hoàn tất, nếu không clip_path có thể bị coi là chưa tồn tại.
+            self._thread.join(timeout=10.0)
+            if self._thread.is_alive():
+                logger.warning(f"DowntimeRecorder [{self.camera_id}]: Clip writer did not finish within 10s: {self.filepath}")
             self._thread = None
+        if not self.filepath or not os.path.exists(self.filepath):
+            logger.error(f"DowntimeRecorder [{self.camera_id}]: Clip file was not created: {self.filepath}")
         return self.filepath
 
 

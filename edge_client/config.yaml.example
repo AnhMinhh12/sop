@@ -13,13 +13,13 @@ hub:
   api_key: "change-me-in-production"  # Must match HUB_API_KEY on Hub
 
 ai:
-  model_path: "shared/models/yolo/laprap.onnx"  # Local model path
+  model_path: "shared/models/yolo/KOR-H2110.onnx"  # Local model path
   input_size: 416
   fps_cap: 15
 
 # SOP configuration - same as Hub's sop_file
 sop:
-  file: "projects/sop_monitoring/config/laprap.yaml"
+  file: "projects/sop_monitoring/config/KOR-H2110.yaml"
 
 # Push settings
 push:

@@ -1,0 +1,38 @@
+station_id: "machine_09"
+station_name: "Station 09 - Máy 9 (KOR-H2110)"
+engine_id: "KOR-H2110"
+
+zones:
+  mold: [[0.5, 0.981], [0.658, 0.983], [0.658, 0.717], [0.512, 0.708]]
+  button_right: [[0.386, 0.611], [0.43, 0.617], [0.436, 0.522], [0.395, 0.517]]
+
+steps:
+  - step_order: 1
+    step_name: "Lấy 4 sản phẩm ra khỏi khuôn"
+    logic: "take_product_from_mold"
+    active_hand: "any"
+    required_zone: "mold"
+    min_dwell_sec: 0.3
+
+  - step_order: 2
+    step_name: "Lắp 4 terminal vào khuôn"
+    logic: "multi_trigger"
+    active_hand: "any"
+    required_zone: "mold"
+    required_count: 4
+    min_dwell_sec: 0.2
+
+  - step_order: 3
+    step_name: "Bấm nút bên phải"
+    logic: "zone_trigger"
+    active_hand: "any"
+    required_zone: "button_right"
+    min_dwell_sec: 0.2
+
+config:
+  violation_tolerance: 8
+  idle_timeout_frames: 120
+  transition_timeout_sec: 35.0
+  min_step_dwell_sec: 0.2
+  restart_allowed_until_step: 1
+  max_cycle_time_sec: 35.0

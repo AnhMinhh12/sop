@@ -120,9 +120,11 @@ class EventQueries:
         try:
             cursor.execute(
                 """UPDATE sop_events
-                   SET duration = %s, step_detected = %s, clip_path = %s
+                   SET duration = %s,
+                       step_detected = %s,
+                       clip_path = CASE WHEN %s <> '' THEN %s ELSE clip_path END
                    WHERE id = %s""",
-                (duration, f"Dừng máy {int(duration)}s (Robot > 5p)", clip_path, event_id)
+                (duration, f"Dừng máy {int(duration)}s (Robot > 5p)", clip_path, clip_path, event_id)
             )
             conn.commit()
             return cursor.rowcount == 1
