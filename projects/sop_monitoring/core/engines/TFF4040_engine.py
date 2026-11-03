@@ -83,16 +83,26 @@ class ProductEngine(BaseEngine):
         self.total_downtime_sec = 0.0
         self.last_downtime_event = None
 
-        # Tải số lần và thời gian dừng máy đã ghi nhận trong ngày từ DB
+        # Theo dõi tổng sản phẩm hoàn thành theo số lần robot thò tay lấy sản phẩm (Máy 7)
+        self.robot_pickups = 0
+        self.total_products = 0
+        self._robot_pickup_dwell_start = 0.0
+        self._robot_pickup_counted = False
+        self._robot_exit_start = 0.0
+        self._pending_product_event = None
+
+        # Tải số lần và thời gian dừng máy, số sản phẩm đã ghi nhận trong ngày từ DB
         try:
             from shared.db.queries import EventQueries
             today_str = time.strftime('%Y-%m-%d')
             db_summary = EventQueries.get_daily_summary(today_str, camera_id=self.station_id)
             self.stop_count = int(db_summary.get("total_downtime_count", 0))
             self.total_downtime_sec = float(db_summary.get("total_downtime_sec", 0.0))
-            logger.info(f"ProductEngine [TFF4040]: Loaded today's downtime history for {self.station_id}: {self.stop_count} stops, {self.total_downtime_sec}s")
+            self.robot_pickups = int(db_summary.get("robot_pickups", 0))
+            self.total_products = int(db_summary.get("total_products", 0))
+            logger.info(f"ProductEngine [TFF4040]: Loaded today's history for {self.station_id}: {self.stop_count} stops, {self.total_downtime_sec}s downtime, {self.robot_pickups} robot pickups ({self.total_products} products)")
         except Exception as e:
-            logger.warning(f"ProductEngine [TFF4040]: Could not load downtime history from DB: {e}")
+            logger.warning(f"ProductEngine [TFF4040]: Could not load history from DB: {e}")
         
         logger.info(f"ProductEngine [TFF4040]: Initialized for station {self.station_id}")
         self.log_debug("--- NEW ENGINE INITIALIZED ---", self.product_id)
@@ -145,6 +155,35 @@ class ProductEngine(BaseEngine):
         # Tự động bắt đầu chu kỳ mới nếu robot được đưa vào khuôn (giữ vững >= min_dwell_sec)
         # Kể cả khi chu kỳ cũ chưa hoàn thành hoặc đang bị lỗi (is_failed)
         robot_in_mold = self._is_object_in_zone(self.last_robots, "mold")
+
+        # --- ĐẾM SẢN PHẨM HOÀN THÀNH THEO MỖI LẦN ROBOT THÒ TAY VÀO KHUÔN (MÁY 7) ---
+        if robot_in_mold:
+            if self._robot_pickup_dwell_start == 0.0:
+                self._robot_pickup_dwell_start = now
+            if (now - self._robot_pickup_dwell_start >= 0.3) and not self._robot_pickup_counted:
+                self._robot_pickup_counted = True
+                self.robot_pickups += 1
+                self.total_products += 2  # Khuôn Máy 7 mỗi lần robot gắp ra 2 sản phẩm
+                self._pending_product_event = {
+                    "added_products": 2,
+                    "robot_pickups": self.robot_pickups,
+                    "total_products": self.total_products
+                }
+                self.log_debug(
+                    f"ROBOT PRODUCT PICKUP: Đã ghi nhận robot gắp SP lần #{self.robot_pickups} (+2 SP, tổng: {self.total_products} SP)",
+                    self.product_id
+                )
+        else:
+            self._robot_pickup_dwell_start = 0.0
+            if self._robot_pickup_counted:
+                if self._robot_exit_start == 0.0:
+                    self._robot_exit_start = now
+                if now - self._robot_exit_start >= 2.0:
+                    self._robot_pickup_counted = False
+                    self._robot_exit_start = 0.0
+            else:
+                self._robot_exit_start = 0.0
+
         if robot_in_mold:
             if self.robot_in_mold_start_time == 0.0:
                 self.robot_in_mold_start_time = now
@@ -546,8 +585,14 @@ class ProductEngine(BaseEngine):
             "machine_stopped_duration": round(self.machine_stopped_duration, 1) if self.is_machine_stopped else 0.0,
             "stop_count": self.stop_count,
             "total_downtime_sec": round(self.total_downtime_sec, 1),
-            "machine_status": "stopped" if self.is_machine_stopped else "running"
+            "machine_status": "stopped" if self.is_machine_stopped else "running",
+            "robot_pickups": getattr(self, "robot_pickups", 0),
+            "total_products": getattr(self, "total_products", 0)
         }
+
+        if getattr(self, "_pending_product_event", None):
+            res["new_product_event"] = self._pending_product_event
+            self._pending_product_event = None
 
         if self.is_machine_stopped:
             mins = int(self.machine_stopped_duration) // 60

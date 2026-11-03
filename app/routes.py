@@ -418,8 +418,14 @@ def export_stats_excel():
     writer.writerow(['--- CHỈ SỐ TỔNG QUAN TRONG NGÀY ---'])
     writer.writerow(['Vi phạm trong ngày:', summary.get('total_violations', 0)])
     writer.writerow(['Tỷ lệ tuân thủ:', f"{summary.get('compliance_rate', 100.0)}%"])
-    total_comp = summary.get('total_completions', 0)
-    writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_comp * 2}/4540 (Số chu kỳ: {total_comp})"])
+    total_comp = summary.get('correct_cycles', summary.get('total_completions', 0))
+    total_prod = summary.get('total_products', total_comp * 2)
+    robot_picks = summary.get('robot_pickups', 0)
+    writer.writerow(['Số chu kỳ làm đúng:', f"{total_comp} chu kỳ"])
+    if robot_picks > 0:
+        writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_prod}/4540 (Số lần robot lấy: {robot_picks})"])
+    else:
+        writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_prod}/4540"])
 
     downtime_cnt = summary.get('total_downtime_count', 0)
     downtime_sec = summary.get('total_downtime_sec', 0.0)

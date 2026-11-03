@@ -46,7 +46,17 @@ class RTSPStream:
 
     def _update_loop(self):
         """Main loop to read frames and handle reconnections."""
-        from app import emit_camera_status # Lazy import to avoid circular dependency
+        try:
+            from app import emit_camera_status  # Lazy import to avoid circular dependency
+        except Exception:
+            emit_camera_status = None
+
+        def emit_camera_status_safe(cam_id: str, status: str):
+            if emit_camera_status is not None:
+                try:
+                    emit_camera_status(cam_id, status)
+                except Exception:
+                    pass
         
         is_rtsp = self.rtsp_url.startswith(("rtsp://", "http://", "https://"))
         
@@ -55,7 +65,7 @@ class RTSPStream:
                 if self.retry_count >= self.max_retries:
                     if self.status != "error":
                         self.status = "error"
-                        emit_camera_status(self.camera_id, "error")
+                        emit_camera_status_safe(self.camera_id, "error")
                         logger.error(f"RTSPStream [{self.camera_id}]: Max retries reached. Stopping attempts.")
                     time.sleep(10) # Chờ lâu hơn trước khi thử lại sau khi đã fail 10 lần
                     self.retry_count = 0 # Reset để thử lại sau khi chờ
@@ -63,11 +73,11 @@ class RTSPStream:
 
                 self._connect()
                 if self.cap is None or not self.cap.isOpened():
-                    emit_camera_status(self.camera_id, "error")
+                    emit_camera_status_safe(self.camera_id, "error")
                     time.sleep(5)
                     continue
                 else:
-                    emit_camera_status(self.camera_id, "connected")
+                    emit_camera_status_safe(self.camera_id, "connected")
 
             # Flush buffer: Xóa sạch bộ đệm để lấy khung hình mới nhất (Real-time)
             if is_rtsp:
@@ -89,7 +99,7 @@ class RTSPStream:
                 
                 if self.status != "connected":
                     self.status = "connected"
-                    emit_camera_status(self.camera_id, "connected")
+                    emit_camera_status_safe(self.camera_id, "connected")
             else:
                 if not is_rtsp:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -97,7 +107,7 @@ class RTSPStream:
                 
                 logger.warning(f"RTSPStream [{self.camera_id}]: Stream signal lost.")
                 self.status = "error"
-                emit_camera_status(self.camera_id, "error")
+                emit_camera_status_safe(self.camera_id, "error")
                 self.cap.release()
                 time.sleep(2)
 

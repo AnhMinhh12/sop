@@ -244,10 +244,16 @@ class FrameProcessor:
                 except Exception as e:
                     logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
 
+            # Ghi nhận sản phẩm hoàn thành từ Robot
+            if self.latest_status.get("new_product_event"):
+                product_ev = self.latest_status.get("new_product_event")
+                self._handle_product_pickup(product_ev)
+
             # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
             is_completed = self.latest_status.get("sop_status") == "completed"
             is_violation = self.latest_status.get("sop_status") == "violation"
             is_stopped = self.latest_status.get("is_machine_stopped", False)
+            has_product_event = bool(self.latest_status.get("new_product_event"))
 
             # Theo dõi dừng máy: Ghi hình 2 phút đầu tiên tính từ lúc bắt đầu dừng máy
             if is_stopped:
@@ -291,7 +297,7 @@ class FrameProcessor:
                 self.last_step_idx = curr_idx
                 step_changed = True
 
-            if is_completed or step_changed:
+            if is_completed or step_changed or has_product_event:
                 if is_completed and not self._completion_logged:
                     self._handle_completion()
                     self._completion_logged = True
@@ -353,6 +359,22 @@ class FrameProcessor:
                 violation_type="success",
                 sop_status="completed",
                 confidence=1.0
+            )
+        threading.Thread(target=background_task, daemon=True).start()
+
+    def _handle_product_pickup(self, product_event: Dict):
+        """Xử lý ghi nhận khi robot thò tay vào lấy sản phẩm thành công."""
+        def background_task():
+            added = float(product_event.get("added_products", 2))
+            logger.info(f"FrameProcessor [{self.cam_id}]: Robot product pickup event (+{added} SP). Logging to DB.")
+            EventQueries.log_event(
+                camera_id=self.cam_id,
+                violation_type="robot_pickup",
+                step_detected="Robot lấy 2 SP từ khuôn",
+                expected_step="Robot lấy 2 SP từ khuôn",
+                sop_status="product_pickup",
+                confidence=1.0,
+                duration=added
             )
         threading.Thread(target=background_task, daemon=True).start()
 

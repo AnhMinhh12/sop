@@ -743,9 +743,23 @@ async function loadStats(date, cameraId = "", productId = "", startHour = "", en
         // 1. Summary
         const summaryRes = await fetch(`/api/stats/summary?${filter}`);
         const summary = await summaryRes.json();
-        document.getElementById('total-violations').innerText = summary.total_violations;
-        document.getElementById('total-completions').innerText = `${summary.total_completions * 2}/4540`;
-        document.getElementById('compliance-rate').innerText = `${summary.compliance_rate}%`;
+        const violEl = document.getElementById('total-violations');
+        if (violEl) violEl.innerText = summary.total_violations;
+
+        const correctCycles = summary.correct_cycles !== undefined ? summary.correct_cycles : summary.total_completions;
+        const correctCyclesEl = document.getElementById('correct-cycles');
+        if (correctCyclesEl) correctCyclesEl.innerText = correctCycles;
+
+        const totalProds = summary.total_products !== undefined ? summary.total_products : (summary.total_completions * 2);
+        const totalProdsEl = document.getElementById('total-products');
+        if (totalProdsEl) totalProdsEl.innerText = `${totalProds}/4540`;
+
+        const totalCompEl = document.getElementById('total-completions');
+        if (totalCompEl) totalCompEl.innerText = `${totalProds}/4540`;
+
+        const compRateEl = document.getElementById('compliance-rate');
+        if (compRateEl) compRateEl.innerText = `${summary.compliance_rate}%`;
+
         const downtimeEl = document.getElementById('total-downtime');
         if (downtimeEl) {
             downtimeEl.innerText = `${summary.total_downtime_count || 0} lần (${formatDowntimeDisplay(summary.total_downtime_sec)})`;
@@ -915,7 +929,7 @@ function renderHourlyChart(data) {
     if (hourlyChart) { try { hourlyChart.destroy(); } catch(e) {} hourlyChart = null; }
 
     const labels = data.map(d => d.hour);
-    const completions = data.map(d => d.completions * 2);
+    const completions = data.map(d => (d.products !== undefined && d.products !== null) ? d.products : (d.completions * 2));
     const violations = data.map(d => d.violations);
 
     // Area chart gradient fills for completion & violation

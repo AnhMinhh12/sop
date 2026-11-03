@@ -188,13 +188,25 @@ class EventQueries:
 
     @staticmethod
     def get_daily_summary(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> Dict[str, Any]:
-        """Lấy tổng lỗi và tỷ lệ tuân thủ của một ngày cụ thể."""
+        """Lấy tổng lỗi, tỷ lệ tuân thủ, số chu kỳ làm đúng và tổng sản phẩm hoàn thành."""
         if camera_id == "undefined" or not camera_id:
             camera_id = None
         if product_id == "undefined" or not product_id:
             product_id = None
             
         conn = db.get_connection()
+        if conn is None:
+            return {
+                "total_violations": 0,
+                "total_completions": 0,
+                "correct_cycles": 0,
+                "total_products": 0,
+                "robot_pickups": 0,
+                "compliance_rate": 100.0,
+                "total_downtime_count": 0,
+                "total_downtime_sec": 0.0,
+                "total_downtime_min": 0.0
+            }
         cursor = conn.cursor()
         try:
             where_clause = "WHERE DATE(e.timestamp) = %s"
@@ -233,7 +245,7 @@ class EventQueries:
             """, tuple(params))
             violations = cursor.fetchone()["cnt"]
 
-            # Đếm số chu kỳ hoàn thành
+            # Đếm số chu kỳ làm đúng (completed)
             cursor.execute(f"""
                 SELECT COUNT(*) as cnt FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
@@ -256,9 +268,30 @@ class EventQueries:
             downtime_count = downtime_row["cnt"] if downtime_row else 0
             downtime_sec = float(downtime_row["total_sec"]) if downtime_row else 0.0
 
+            # Đếm số lần robot thò tay lấy sản phẩm và tổng sản phẩm hoàn thành (Máy 7)
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt, COALESCE(SUM(duration), 0) as total_prod FROM sop_events e
+                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
+                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
+                {where_clause} AND (e.sop_status = 'product_pickup' OR e.violation_type = 'robot_pickup')
+            """, tuple(params))
+            prod_row = cursor.fetchone()
+            robot_pickups = prod_row["cnt"] if prod_row else 0
+            db_prods = int(prod_row["total_prod"]) if (prod_row and prod_row["total_prod"] > 0) else (robot_pickups * 2)
+
+            # Nếu có dữ liệu robot_pickup trong DB -> dùng db_prods
+            # Nếu chưa có (dữ liệu cũ hoặc máy không có robot) -> fallback completions * 2
+            if robot_pickups > 0:
+                total_products = db_prods
+            else:
+                total_products = completions * 2
+
             res = {
                 "total_violations": violations,
                 "total_completions": completions,
+                "correct_cycles": completions,
+                "total_products": total_products,
+                "robot_pickups": robot_pickups,
                 "compliance_rate": round(compliance, 1),
                 "total_downtime_count": downtime_count,
                 "total_downtime_sec": round(downtime_sec, 1),
@@ -269,10 +302,22 @@ class EventQueries:
         except Exception as e:
             EventQueries._log_to_file(f"GET_SUMMARY_ERROR: {e}")
             logger.error(f"DB Error getting daily summary: {e}")
-            return {"total_violations": 0, "total_completions": 0, "compliance_rate": 100.0}
+            return {
+                "total_violations": 0,
+                "total_completions": 0,
+                "correct_cycles": 0,
+                "total_products": 0,
+                "robot_pickups": 0,
+                "compliance_rate": 100.0,
+                "total_downtime_count": 0,
+                "total_downtime_sec": 0.0,
+                "total_downtime_min": 0.0
+            }
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     @staticmethod
     def get_daily_distribution(target_date: str, camera_id: Optional[str] = None, product_id: Optional[str] = None, start_hour: Optional[int] = None, end_hour: Optional[int] = None) -> Dict[str, int]:
@@ -442,7 +487,8 @@ class EventQueries:
             cursor.execute(f"""
                 SELECT HOUR(e.timestamp) as hr,
                        SUM(CASE WHEN e.sop_status = 'violation' THEN 1 ELSE 0 END) as violations,
-                       SUM(CASE WHEN e.sop_status = 'completed' THEN 1 ELSE 0 END) as completions
+                       SUM(CASE WHEN e.sop_status = 'completed' THEN 1 ELSE 0 END) as completions,
+                       SUM(CASE WHEN e.sop_status = 'product_pickup' OR e.violation_type = 'robot_pickup' THEN COALESCE(e.duration, 2) ELSE 0 END) as robot_products
                 FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
                 {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
@@ -451,17 +497,29 @@ class EventQueries:
                 ORDER BY hr
             """, tuple(params))
             
-            db_data = {row["hr"]: {"violations": int(row["violations"]), "completions": int(row["completions"])} for row in cursor.fetchall()}
+            db_data = {}
+            for row in cursor.fetchall():
+                v_cnt = int(row["violations"])
+                c_cnt = int(row["completions"])
+                r_prod = int(row.get("robot_products") or 0)
+                # Nếu có robot pickup thì lấy r_prod, ngược lại fallback completions * 2
+                p_cnt = r_prod if r_prod > 0 else (c_cnt * 2)
+                db_data[row["hr"]] = {
+                    "violations": v_cnt,
+                    "completions": c_cnt,
+                    "products": p_cnt
+                }
             
             hourly = []
             start_h = start_hour if start_hour is not None else 0
             end_h = end_hour if end_hour is not None else 23
             for h in range(start_h, end_h + 1):
-                data = db_data.get(h, {"violations": 0, "completions": 0})
+                data = db_data.get(h, {"violations": 0, "completions": 0, "products": 0})
                 hourly.append({
                     "hour": f"{h:02d}:00",
                     "violations": data["violations"],
-                    "completions": data["completions"]
+                    "completions": data["completions"],
+                    "products": data["products"]
                 })
             return hourly
         except Exception as e:

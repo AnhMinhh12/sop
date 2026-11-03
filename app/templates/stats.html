@@ -3,6 +3,51 @@
 {% block title %}Thống kê hiệu suất - SOP AI MONITORING{% endblock %}
 
 {% block head %}
+<style>
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+        gap: 16px;
+        margin-bottom: 25px;
+    }
+    @media (max-width: 1200px) {
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+        }
+    }
+    .stat-card {
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
+        text-align: center;
+        padding: 22px 12px !important;
+        min-height: 140px;
+    }
+    .stat-card .widget-title {
+        height: 40px !important;
+        min-height: 40px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+        margin-bottom: 12px !important;
+        line-height: 1.25 !important;
+        font-size: 0.8rem !important;
+        width: 100% !important;
+    }
+    .stat-card .stat-big-value {
+        margin-top: 0 !important;
+        font-size: 2.25rem !important;
+        font-weight: 800;
+        line-height: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+        white-space: nowrap !important;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -104,8 +149,13 @@
         <div class="stat-big-value" id="compliance-rate">100%</div>
     </div>
     <div class="widget stat-card">
+        <div class="widget-title">Số chu kỳ làm đúng</div>
+        <div class="stat-big-value" id="correct-cycles">0</div>
+        <div id="total-completions" style="display: none;">0</div>
+    </div>
+    <div class="widget stat-card">
         <div class="widget-title">Tổng sản phẩm hoàn thành</div>
-        <div class="stat-big-value" id="total-completions">0</div>
+        <div class="stat-big-value" id="total-products">0/4540</div>
     </div>
     <div class="widget stat-card" style="border-left: 4px solid #ea580c;">
         <div class="widget-title">Dừng máy trong ngày (Máy 7)</div>
