@@ -8,10 +8,10 @@
 
     
     <!-- Localized Dependencies (Offline Mode) -->
-    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/tailwind.js') }}"></script>
-    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
-    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/chart_lib.js') }}"></script>
-    <link rel="stylesheet" href="{{ config.HUB_URL }}{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chart_lib.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     
     <!-- Standard High-Clarity Typography (System Font Stack - No Internet Required) -->
     <style>
@@ -22,7 +22,7 @@
     </style>
     
     <script>
-        tailwind.config = {
+        if (window.tailwind) tailwind.config = {
             darkMode: "class",
             theme: {
                 extend: {
@@ -198,7 +198,7 @@
         {% include 'partials/modals.html' %}
     {% endblock %}
     <div id="toast-container" class="toast-container"></div>
-    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

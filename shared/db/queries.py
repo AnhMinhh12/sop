@@ -247,12 +247,17 @@ class EventQueries:
 
             # Đếm số chu kỳ làm đúng (completed)
             cursor.execute(f"""
-                SELECT COUNT(*) as cnt FROM sop_events e
-                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
-                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
+                SELECT COUNT(*) as cnt,
+                       COALESCE(SUM(CASE WHEN LOCATE('laprap', LOWER(COALESCE(d.name, ''))) > 0
+                           OR (d.id IS NULL AND c.station_id = 'machine_08') THEN 1 ELSE 2 END), 0) as products
+                FROM sop_events e
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
                 {where_clause} AND e.sop_status = 'completed'
             """, tuple(params))
-            completions = cursor.fetchone()["cnt"]
+            completion_row = cursor.fetchone()
+            completions = completion_row["cnt"]
+            total_products = int(completion_row["products"])
 
             total_cycles = violations + completions
             compliance = 100.0 if total_cycles == 0 else (completions / total_cycles) * 100.0
@@ -277,14 +282,6 @@ class EventQueries:
             """, tuple(params))
             prod_row = cursor.fetchone()
             robot_pickups = prod_row["cnt"] if prod_row else 0
-            db_prods = int(prod_row["total_prod"]) if (prod_row and prod_row["total_prod"] > 0) else (robot_pickups * 2)
-
-            # Nếu có dữ liệu robot_pickup trong DB -> dùng db_prods
-            # Nếu chưa có (dữ liệu cũ hoặc máy không có robot) -> fallback completions * 2
-            if robot_pickups > 0:
-                total_products = db_prods
-            else:
-                total_products = completions * 2
 
             res = {
                 "total_violations": violations,
@@ -488,10 +485,13 @@ class EventQueries:
                 SELECT HOUR(e.timestamp) as hr,
                        SUM(CASE WHEN e.sop_status = 'violation' THEN 1 ELSE 0 END) as violations,
                        SUM(CASE WHEN e.sop_status = 'completed' THEN 1 ELSE 0 END) as completions,
-                       SUM(CASE WHEN e.sop_status = 'product_pickup' OR e.violation_type = 'robot_pickup' THEN COALESCE(e.duration, 2) ELSE 0 END) as robot_products
+                       SUM(CASE WHEN e.sop_status = 'completed' THEN
+                           CASE WHEN LOCATE('laprap', LOWER(COALESCE(d.name, ''))) > 0
+                               OR (d.id IS NULL AND c.station_id = 'machine_08') THEN 1 ELSE 2 END
+                           ELSE 0 END) as products
                 FROM sop_events e
-                {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
-                {"LEFT JOIN sop_definitions d ON e.definition_id = d.id" if product_id else ""}
+                LEFT JOIN sop_cameras c ON e.camera_id = c.id
+                LEFT JOIN sop_definitions d ON e.definition_id = d.id
                 {where_clause}
                 GROUP BY HOUR(e.timestamp)
                 ORDER BY hr
@@ -501,9 +501,7 @@ class EventQueries:
             for row in cursor.fetchall():
                 v_cnt = int(row["violations"])
                 c_cnt = int(row["completions"])
-                r_prod = int(row.get("robot_products") or 0)
-                # Nếu có robot pickup thì lấy r_prod, ngược lại fallback completions * 2
-                p_cnt = r_prod if r_prod > 0 else (c_cnt * 2)
+                p_cnt = int(row.get("products") or 0)
                 db_data[row["hr"]] = {
                     "violations": v_cnt,
                     "completions": c_cnt,

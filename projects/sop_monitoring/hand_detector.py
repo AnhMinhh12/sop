@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class HandDetector:
     """
-    Wrapper for YOLOv11 hand detection model.
+    Wrapper for YOLOv11 hand and product detection model.
     Uses InferenceEngine for shared, synchronized CPU inference.
     """
     def __init__(self, camera_id: str, confidence_threshold: Optional[float] = None,
@@ -54,7 +54,7 @@ class HandDetector:
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """
         Runs synchronous inference and post-processes results.
-        Returns a list of detected hands: [{"bbox": [x1, y1, x2, y2], "confidence": float}]
+        Returns a list of detected objects: [{"bbox": [x1, y1, x2, y2], "confidence": float, "class": str}]
         """
         if self.engine is None:
             logger.warning(f"HandDetector [{self.camera_id}]: No InferenceEngine available.")
@@ -71,16 +71,31 @@ class HandDetector:
         return detections
 
     def _postprocess(self, result: Dict, orig_shape: tuple) -> List[Dict]:
-        """Hậu xử lý YOLOv11 - Hỗ trợ cả 1 class (hand) và nhiều class (hand, product)."""
+        """Hậu xử lý YOLOv11 - Hỗ trợ động class mapping từ metadata ONNX hoặc số lượng class."""
         output = np.squeeze(result["raw_output"][0])
-        output = output.T # (8400, 4 + num_classes) -> [cx, cy, w, h, class0_conf, class1_conf, ...]
+        output = output.T  # (8400, 4 + num_classes) -> [cx, cy, w, h, class0_conf, class1_conf, ...]
         
         num_classes = output.shape[1] - 4
-        # Class mapping: 0=hand, 1=robot (arm công nghiệp), 2=sp (sản phẩm)
-        if num_classes == 2:
-            class_mapping = {0: "hand", 1: "sp"}
-        else:
-            class_mapping = {0: "hand", 1: "robot", 2: "sp"}
+        
+        # Tự động đọc class_mapping từ metadata ONNX nếu có
+        class_mapping = None
+        if hasattr(self.engine, "session") and self.engine.session is not None:
+            try:
+                meta = self.engine.session.get_modelmeta().custom_metadata_map
+                if "names" in meta:
+                    import ast
+                    raw_names = ast.literal_eval(meta["names"])
+                    class_mapping = {int(k): str(v) for k, v in raw_names.items()}
+            except Exception:
+                pass
+
+        if not class_mapping:
+            if num_classes == 4:
+                class_mapping = {0: "hand", 1: "part_hand", 2: "part_tray", 3: "screw"}
+            elif num_classes == 2:
+                class_mapping = {0: "hand", 1: "sp"}
+            else:
+                class_mapping = {0: "hand", 1: "robot", 2: "sp"}
         
         all_boxes = []
         all_confs = []

@@ -90,6 +90,8 @@ class FrameProcessor:
         self._last_downtime_db_update = 0.0
 
         self.running = False
+        self.monitoring_enabled = True
+        self._monitoring_lock = threading.RLock()
         self._completion_logged = False  # Cờ để chặn ghi log thành công nhiều lần
         self.current_processed_frame = None
         self.frame_lock = threading.Lock()  # Bảo vệ current_processed_frame khi đọc từ HTTP generator
@@ -111,6 +113,32 @@ class FrameProcessor:
         self.thread.start()
         logger.info(f"FrameProcessor [{self.cam_id}]: YOLO-ONLY Engine Started.")
 
+    def set_monitoring(self, enabled: bool):
+        """Pause analysis without interrupting the camera stream."""
+        with self._monitoring_lock:
+            if self.monitoring_enabled == enabled:
+                return
+            if not enabled and self._active_downtime_event_id:
+                clip = self.downtime_recorder.stop() or self._current_downtime_clip or ""
+                EventQueries.update_downtime_event(
+                    self._active_downtime_event_id,
+                    max(0.0, time.time() - self._downtime_started_at), clip
+                )
+            self._active_downtime_event_id = None
+            self._was_machine_stopped = False
+            self._current_downtime_clip = None
+            self.engine.reset()
+            if hasattr(self.engine, 'last_downtime_event'):
+                self.engine.last_downtime_event = None
+            self._cached_hands = []
+            self._cached_products = []
+            self._cached_robots = []
+            self._completion_logged = False
+            self.last_step_idx = -1
+            self.monitoring_enabled = enabled
+            self.latest_status = {"sop_status": "idle", "progress_percent": 0,
+                                  "status_msg": "Sẵn sàng" if enabled else "Đã tắt giám sát"}
+
     def _process_loop(self):
         from app import emit_step_update
 
@@ -120,193 +148,202 @@ class FrameProcessor:
             if frame is None:
                 time.sleep(0.05); continue
 
-            # Frame đã được resize trong RTSPStream — KHÔNG resize lại ở đây
-            self._target_w = frame.shape[1]
-            self._target_h = frame.shape[0]
-            if hasattr(self.engine, "config"):
-                self.engine.config["w"] = self._target_w
-                self.engine.config["h"] = self._target_h
+            with self._monitoring_lock:
+                if not self.monitoring_enabled:
+                    with self.frame_lock:
+                        self.current_processed_frame = frame
+                        self._loop_count += 1
+                else:
+                    # Frame đã được resize trong RTSPStream — KHÔNG resize lại ở đây
+                    self._target_w = frame.shape[1]
+                    self._target_h = frame.shape[0]
+                    if hasattr(self.engine, "config"):
+                        self.engine.config["w"] = self._target_w
+                        self.engine.config["h"] = self._target_h
 
-            # Push frame gốc vào ring buffer (deque tự quản lý bộ nhớ)
-            self.ring_buffer.push(frame)
+                    # Push frame gốc vào ring buffer (deque tự quản lý bộ nhớ)
+                    self.ring_buffer.push(frame)
             
-            # --- AI PROCESSING (YOLO ONLY) ---
-            # Chạy AI mỗi 2 frame (~7.5 FPS) — đã chứng minh chính xác cho SOP detection
-            hands_data = self._cached_hands
+                    # --- AI PROCESSING (YOLO ONLY) ---
+                    # Chạy AI mỗi 2 frame (~7.5 FPS) — đã chứng minh chính xác cho SOP detection
+                    hands_data = self._cached_hands
             
-            if self._loop_count % 2 == 0:
-                detections = self.hand_detector.detect(frame)
+                    if self._loop_count % 2 == 0:
+                        detections = self.hand_detector.detect(frame)
                 
-                # Phân tách detections thành tay, sản phẩm, và robot
-                hand_dets = [
-                    d for d in detections 
-                    if d.get("class", "hand") == "hand"
-                    and (d["bbox"][2] - d["bbox"][0]) <= frame.shape[1] * 0.35
-                    and (d["bbox"][3] - d["bbox"][1]) <= frame.shape[0] * 0.35
-                ]
-                self._cached_products = [d for d in detections if d.get("class") == "sp"]
-                self._cached_robots = [d for d in detections if d.get("class") == "robot"]
+                        # Phân tách detections thành tay, sản phẩm, và robot
+                        hand_dets = [
+                            d for d in detections 
+                            if d.get("class", "hand") == "hand"
+                            and (d["bbox"][2] - d["bbox"][0]) <= frame.shape[1] * 0.35
+                            and (d["bbox"][3] - d["bbox"][1]) <= frame.shape[0] * 0.35
+                        ]
+                        self._cached_products = [d for d in detections if d.get("class") in ["sp", "part_hand", "part_tray", "screw"]]
+                        self._cached_robots = [d for d in detections if d.get("class") == "robot"]
                 
-                # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
-                filtered_dets = self._filter_detections_by_roi(hand_dets)
+                        # 1. Lọc tay ngoài vùng làm việc bằng Dynamic ROI
+                        filtered_dets = self._filter_detections_by_roi(hand_dets)
                 
-                # 2. Bám vết và định danh tay Trái/Phải để tránh nhảy box khi có người khác
-                hands_data = self._associate_hands(filtered_dets)
-                self._cached_hands = hands_data
-                self._last_hands_update_time = loop_start
+                        # 2. Bám vết và định danh tay Trái/Phải để tránh nhảy box khi có người khác
+                        hands_data = self._associate_hands(filtered_dets)
+                        self._cached_hands = hands_data
+                        self._last_hands_update_time = loop_start
 
-            # --- TAY MA (GHOST HANDS) PROTECTION ---
-            # Nếu AI không chạy hoặc detector liên tục không thấy tay trong 0.8s, xóa cache.
-            # Điều này ngăn việc engine nhận diện nhầm khi công nhân đã rút tay ra nhưng AI chưa update.
-            if loop_start - self._last_hands_update_time > 0.8:
-                self._cached_hands = []
-                self._cached_products = []
-                self._cached_robots = []
-                hands_data = []
+                    # --- TAY MA (GHOST HANDS) PROTECTION ---
+                    # Nếu AI không chạy hoặc detector liên tục không thấy tay trong 0.8s, xóa cache.
+                    # Điều này ngăn việc engine nhận diện nhầm khi công nhân đã rút tay ra nhưng AI chưa update.
+                    if loop_start - self._last_hands_update_time > 0.8:
+                        self._cached_hands = []
+                        self._cached_products = []
+                        self._cached_robots = []
+                        hands_data = []
 
-            # 3. Dynamic Engine Update (truyền thêm robot_data cho TFF4040)
-            self.latest_status = self.engine.update(hands_data, self._cached_products, self._cached_robots)
+                    # 3. Dynamic Engine Update (truyền thêm robot_data cho TFF4040)
+                    self.latest_status = self.engine.update(hands_data, self._cached_products, self._cached_robots)
             
-            # 4. Check Violation
-            violation = self.violation_detector.analyze(self.latest_status)
-            if violation:
-                self._handle_violation(violation)
+                    # 4. Check Violation
+                    violation = self.violation_detector.analyze(self.latest_status)
+                    if violation:
+                        self._handle_violation(violation)
 
-            # 5. Annotation — TỐI ƯU: Vẽ trực tiếp lên frame đã lấy từ stream (đã là 1 bản copy)
-            # Việc này giúp giảm 1 lần copy ảnh mỗi frame và giúp clip vi phạm có sẵn Bbox để đối soát.
-            display_frame = frame 
-            # Note: Annotator.draw_zones might need access to current engine's zones
-            if hasattr(self.engine, 'zones'):
-                Annotator.draw_zones(display_frame, self.engine.zones)
-            for h in self._cached_hands:
-                bbox = h["bbox"]
-                color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
-                cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
+                    # 5. Annotation — TỐI ƯU: Vẽ trực tiếp lên frame đã lấy từ stream (đã là 1 bản copy)
+                    # Việc này giúp giảm 1 lần copy ảnh mỗi frame và giúp clip vi phạm có sẵn Bbox để đối soát.
+                    display_frame = frame 
+                    # Note: Annotator.draw_zones might need access to current engine's zones
+                    if hasattr(self.engine, 'zones') and not getattr(self.engine, 'custom_draw_zones', False):
+                        Annotator.draw_zones(display_frame, self.engine.zones)
+                    for h in self._cached_hands:
+                        bbox = h["bbox"]
+                        color = (0, 255, 255) if h["label"] == "left" else (0, 230, 20)
+                        cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
                 
-            # Vẽ sản phẩm (nếu được phát hiện) bằng màu cam cho laprap, xanh dương cho các máy khác
-            prod_color = (0, 128, 255) if getattr(self.engine, "product_id", None) == "laprap" else (255, 0, 0)
-            for p in self._cached_products:
-                bbox = p["bbox"]
-                cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), prod_color, 2)
-                cv2.putText(display_frame, "Product", (int(bbox[0]), int(bbox[1] - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
-
-            # Vẽ robot arm (nếu được phát hiện) bằng màu hồng
-            for r in self._cached_robots:
-                bbox = r["bbox"]
-                cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 100, 180), 2)
-                cv2.putText(display_frame, "Robot", (int(bbox[0]), int(bbox[1] - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 180), 1, cv2.LINE_AA)
-
-            self.current_processed_frame = display_frame
-            with self.frame_lock:
-                self._loop_count += 1
-            
-            # Ghi nhận sự kiện dừng máy khi kết thúc đợt dừng (Downtime Event)
-            if getattr(self.engine, "last_downtime_event", None):
-                downtime_ev = self.engine.last_downtime_event
-                self.engine.last_downtime_event = None
-                self._was_machine_stopped = False
-
-                # Dừng recorder nếu còn đang ghi và chốt đường dẫn clip
-                clip_path = self.downtime_recorder.stop() or self._current_downtime_clip or ""
-                self._current_downtime_clip = None
-
-                try:
-                    dur = downtime_ev.get("duration", 0.0)
-                    start_ts = downtime_ev.get("start_time")
-                    start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts)) if start_ts else None
-                    # Lưu đường dẫn recorder đã tạo ngay cả khi FFmpeg còn đang chốt
-                    # container MP4. Kiểm tra exists ở thời điểm này gây race condition:
-                    # file xuất hiện vài giây sau nhưng lịch sử đã bị lưu clip_path rỗng.
-                    valid_clip = clip_path or ""
-                    if valid_clip and not os.path.exists(valid_clip):
-                        logger.warning(f"FrameProcessor [{self.cam_id}]: Downtime clip is still finalizing: {valid_clip}")
-
-                    if self._active_downtime_event_id:
-                        EventQueries.update_downtime_event(
-                            self._active_downtime_event_id, dur, valid_clip
-                        )
-                        logger.info(f"FrameProcessor [{self.cam_id}]: Closed downtime event {self._active_downtime_event_id} (duration={dur}s)")
+                    # Vẽ HUD đặc thù của engine (nếu có, ví dụ laprap_engine)
+                    if hasattr(self.engine, "draw_hud"):
+                        display_frame = self.engine.draw_hud(display_frame)
                     else:
-                        EventQueries.log_event(
-                            camera_id=self.cam_id,
-                            violation_type="machine_stop",
-                            step_detected=f"Dừng máy {int(dur)}s (Robot > 5p)",
-                            expected_step="Bước 1: Robot lấy 2 SP",
-                            sop_status="machine_stop",
-                            confidence=1.0,
-                            clip_path=valid_clip,
-                            duration=dur,
-                            timestamp=start_time_str
-                        )
-                    self._active_downtime_event_id = None
-                except Exception as e:
-                    logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
+                        prod_color = (255, 0, 0)
+                        for p in self._cached_products:
+                            bbox = p["bbox"]
+                            cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), prod_color, 2)
+                            cv2.putText(display_frame, "Product", (int(bbox[0]), int(bbox[1] - 5)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, prod_color, 1, cv2.LINE_AA)
 
-            # Ghi nhận sản phẩm hoàn thành từ Robot
-            if self.latest_status.get("new_product_event"):
-                product_ev = self.latest_status.get("new_product_event")
-                self._handle_product_pickup(product_ev)
+                    # Vẽ robot arm (nếu được phát hiện) bằng màu hồng
+                    for r in self._cached_robots:
+                        bbox = r["bbox"]
+                        cv2.rectangle(display_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 100, 180), 2)
+                        cv2.putText(display_frame, "Robot", (int(bbox[0]), int(bbox[1] - 5)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 180), 1, cv2.LINE_AA)
 
-            # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
-            is_completed = self.latest_status.get("sop_status") == "completed"
-            is_violation = self.latest_status.get("sop_status") == "violation"
-            is_stopped = self.latest_status.get("is_machine_stopped", False)
-            has_product_event = bool(self.latest_status.get("new_product_event"))
+                    self.current_processed_frame = display_frame
+                    with self.frame_lock:
+                        self._loop_count += 1
+            
+                    # Ghi nhận sự kiện dừng máy khi kết thúc đợt dừng (Downtime Event)
+                    if getattr(self.engine, "last_downtime_event", None):
+                        downtime_ev = self.engine.last_downtime_event
+                        self.engine.last_downtime_event = None
+                        self._was_machine_stopped = False
 
-            # Theo dõi dừng máy: Ghi hình 2 phút đầu tiên tính từ lúc bắt đầu dừng máy
-            if is_stopped:
-                if not self._was_machine_stopped:
-                    self._was_machine_stopped = True
-                    self._current_downtime_clip = self.downtime_recorder.start(start_time=time.time())
-                    start_ts = getattr(self.engine, "step_1_wait_start_time", 0.0) or time.time()
-                    self._downtime_started_at = start_ts
-                    self._last_downtime_db_update = time.time()
-                    self._active_downtime_event_id = EventQueries.log_event(
-                        camera_id=self.cam_id,
-                        violation_type="machine_stop",
-                        step_detected="Dừng máy - đang diễn ra (Robot > 5p)",
-                        expected_step="Bước 1: Robot lấy 2 SP",
-                        sop_status="machine_stop",
-                        confidence=1.0,
-                        duration=0.0,
-                        timestamp=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts))
-                    )
-                # Cập nhật định kỳ để lịch sử/thống kê phản ánh cả đợt dừng đang diễn ra.
-                now_ts = time.time()
-                if (self._active_downtime_event_id and
-                        now_ts - self._last_downtime_db_update >= 15.0):
-                    EventQueries.update_downtime_event(
-                        self._active_downtime_event_id,
-                        now_ts - self._downtime_started_at
-                    )
-                    self._last_downtime_db_update = now_ts
-                if self.downtime_recorder.is_recording:
-                    self.downtime_recorder.push_frame(frame)
-            else:
-                # Nếu không còn dừng máy nhưng cờ vẫn bật, đảm bảo reset
-                if self._was_machine_stopped and not getattr(self.engine, "last_downtime_event", None):
-                    self._was_machine_stopped = False
-                    self.downtime_recorder.stop()
-                    self._current_downtime_clip = None
+                        # Dừng recorder nếu còn đang ghi và chốt đường dẫn clip
+                        clip_path = self.downtime_recorder.stop() or self._current_downtime_clip or ""
+                        self._current_downtime_clip = None
 
-            step_changed = False
-            curr_idx = self.engine.current_step_idx if hasattr(self.engine, 'current_step_idx') else -1
-            if curr_idx != self.last_step_idx:
-                self.last_step_idx = curr_idx
-                step_changed = True
+                        try:
+                            dur = downtime_ev.get("duration", 0.0)
+                            start_ts = downtime_ev.get("start_time")
+                            start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts)) if start_ts else None
+                            # Lưu đường dẫn recorder đã tạo ngay cả khi FFmpeg còn đang chốt
+                            # container MP4. Kiểm tra exists ở thời điểm này gây race condition:
+                            # file xuất hiện vài giây sau nhưng lịch sử đã bị lưu clip_path rỗng.
+                            valid_clip = clip_path or ""
+                            if valid_clip and not os.path.exists(valid_clip):
+                                logger.warning(f"FrameProcessor [{self.cam_id}]: Downtime clip is still finalizing: {valid_clip}")
 
-            if is_completed or step_changed or has_product_event:
-                if is_completed and not self._completion_logged:
-                    self._handle_completion()
-                    self._completion_logged = True
-                emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
-            else:
-                # Reset cờ khi quay lại trạng thái bình thường (processing hoặc violation)
-                self._completion_logged = False
-                if is_violation or is_stopped or self._loop_count % 15 == 0:
-                    emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
+                            if self._active_downtime_event_id:
+                                EventQueries.update_downtime_event(
+                                    self._active_downtime_event_id, dur, valid_clip
+                                )
+                                logger.info(f"FrameProcessor [{self.cam_id}]: Closed downtime event {self._active_downtime_event_id} (duration={dur}s)")
+                            else:
+                                EventQueries.log_event(
+                                    camera_id=self.cam_id,
+                                    violation_type="machine_stop",
+                                    step_detected=f"Dừng máy {int(dur)}s (Robot > 5p)",
+                                    expected_step="Bước 1: Robot lấy 2 SP",
+                                    sop_status="machine_stop",
+                                    confidence=1.0,
+                                    clip_path=valid_clip,
+                                    duration=dur,
+                                    timestamp=start_time_str
+                                )
+                            self._active_downtime_event_id = None
+                        except Exception as e:
+                            logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
+
+                    # Ghi nhận sản phẩm hoàn thành từ Robot
+                    if self.latest_status.get("new_product_event"):
+                        product_ev = self.latest_status.get("new_product_event")
+                        self._handle_product_pickup(product_ev)
+
+                    # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
+                    is_completed = self.latest_status.get("sop_status") == "completed"
+                    is_violation = self.latest_status.get("sop_status") == "violation"
+                    is_stopped = self.latest_status.get("is_machine_stopped", False)
+                    has_product_event = bool(self.latest_status.get("new_product_event"))
+
+                    # Theo dõi dừng máy: Ghi hình 2 phút đầu tiên tính từ lúc bắt đầu dừng máy
+                    if is_stopped:
+                        if not self._was_machine_stopped:
+                            self._was_machine_stopped = True
+                            self._current_downtime_clip = self.downtime_recorder.start(start_time=time.time())
+                            start_ts = getattr(self.engine, "step_1_wait_start_time", 0.0) or time.time()
+                            self._downtime_started_at = start_ts
+                            self._last_downtime_db_update = time.time()
+                            self._active_downtime_event_id = EventQueries.log_event(
+                                camera_id=self.cam_id,
+                                violation_type="machine_stop",
+                                step_detected="Dừng máy - đang diễn ra (Robot > 5p)",
+                                expected_step="Bước 1: Robot lấy 2 SP",
+                                sop_status="machine_stop",
+                                confidence=1.0,
+                                duration=0.0,
+                                timestamp=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_ts))
+                            )
+                        # Cập nhật định kỳ để lịch sử/thống kê phản ánh cả đợt dừng đang diễn ra.
+                        now_ts = time.time()
+                        if (self._active_downtime_event_id and
+                                now_ts - self._last_downtime_db_update >= 15.0):
+                            EventQueries.update_downtime_event(
+                                self._active_downtime_event_id,
+                                now_ts - self._downtime_started_at
+                            )
+                            self._last_downtime_db_update = now_ts
+                        if self.downtime_recorder.is_recording:
+                            self.downtime_recorder.push_frame(frame)
+                    else:
+                        # Nếu không còn dừng máy nhưng cờ vẫn bật, đảm bảo reset
+                        if self._was_machine_stopped and not getattr(self.engine, "last_downtime_event", None):
+                            self._was_machine_stopped = False
+                            self.downtime_recorder.stop()
+                            self._current_downtime_clip = None
+
+                    step_changed = False
+                    curr_idx = self.engine.current_step_idx if hasattr(self.engine, 'current_step_idx') else -1
+                    if curr_idx != self.last_step_idx:
+                        self.last_step_idx = curr_idx
+                        step_changed = True
+
+                    if is_completed or step_changed or has_product_event:
+                        if is_completed and not self._completion_logged:
+                            self._handle_completion()
+                            self._completion_logged = True
+                        emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
+                    else:
+                        # Reset cờ khi quay lại trạng thái bình thường (processing hoặc violation)
+                        self._completion_logged = False
+                        if is_violation or is_stopped or self._loop_count % 15 == 0:
+                            emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
 
             elapsed = time.time() - loop_start
             time.sleep(max(0, self.frame_delay - elapsed))
@@ -354,11 +391,21 @@ class FrameProcessor:
         """Xử lý khi hoàn thành 1 chu kỳ SOP thành công."""
         def background_task():
             logger.info(f"FrameProcessor [{self.cam_id}]: SOP COMPLETED SUCCESSFULLY. Logging to DB.")
+            dur = getattr(self.engine, "last_cycle_duration", 0.0)
+            if dur <= 0.0 and hasattr(self.engine, "cycle_start_time") and self.engine.cycle_start_time > 0:
+                dur = round(time.time() - self.engine.cycle_start_time, 1)
+            
+            exp_step = self.latest_status.get("expected_step", "Hoàn tất chu kỳ")
+            det_step = self.latest_status.get("detected_label", "Hoàn thành chu kỳ")
+            
             EventQueries.log_event(
                 camera_id=self.cam_id,
                 violation_type="success",
+                step_detected=det_step,
+                expected_step=exp_step,
                 sop_status="completed",
-                confidence=1.0
+                confidence=1.0,
+                duration=dur
             )
         threading.Thread(target=background_task, daemon=True).start()
 
@@ -386,14 +433,12 @@ class FrameProcessor:
             new_engine = EngineLoader.create_engine(product_id, sop_config)
             
             # Tạm thời khóa để đổi engine
-            old_engine = self.engine
-            self.engine = new_engine
-            self.sop_config = sop_config
-            
-            # Reset trạng thái
-            self.engine.reset()
-            self._completion_logged = False
-            self.latest_status = {"sop_status": "idle", "progress_percent": 0}
+            with self._monitoring_lock:
+                self.engine = new_engine
+                self.sop_config = sop_config
+                self.engine.reset()
+                self._completion_logged = False
+                self.latest_status = {"sop_status": "idle", "progress_percent": 0}
             
             logger.info(f"FrameProcessor [{self.cam_id}]: Successfully switched to '{product_id}'.")
             return True

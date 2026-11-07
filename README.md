@@ -2,6 +2,8 @@
 
 Hệ thống giám sát thao tác lắp ráp của công nhân qua IP Camera thời gian thực (Real-time). Hệ thống tự động phát hiện bàn tay của công nhân (bằng mô hình YOLO ONNX chạy trên CPU), theo dõi sự tương tác với các vùng không gian (ROI), kiểm soát trình tự lắp ráp (SOP), cảnh báo âm thanh khi phát hiện vi phạm, lưu video clip vi phạm và hiển thị trực quan thông tin trên Web Dashboard.
 
+> 💡 **Dành cho thành viên mới:** Xem ngay tài liệu hướng dẫn tổng quan và kế hoạch triển khai tại [ONBOARDING.md](ONBOARDING.md).
+
 ---
 
 ## 🚀 Tính năng nổi bật

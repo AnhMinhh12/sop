@@ -1,58 +1,45 @@
-station_id: "08"
-station_name: "Máy 8 - Lắp ráp linh kiện"
+station_id: "machine_08"
+station_name: "Máy IN-HOT-LAPRAP - laprap"
+target_screws: 8
+missing_dwell_sec: 4.5
+max_cycle_time_sec: 35.0
 
-# ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
+# ĐỊNH NGHĨA 2 VÙNG ROI: VÙNG CẤT (TRÁI) VÀ VÙNG LẤY (PHẢI)
 zones:
-  hop_giua: [[0.598, 0.824], [0.393, 0.856], [0.389, 0.535], [0.551, 0.522]]
-  thung_tren: [[0.389, 0.876], [0.083, 0.769], [0.173, 0.414], [0.395, 0.481]]
-  thung_phai: [[0.553, 0.517], [0.305, 0.526], [0.312, 0.285], [0.55, 0.285]]
-  thung_trai: [[0.364, 0.998], [0.392, 0.865], [0.603, 0.828], [0.631, 0.997]]
+  vung_cat: [[0.02, 0.11], [0.36, 0.11], [0.36, 0.94], [0.02, 0.94]]
+  vung_lay: [[0.60, 0.18], [0.97, 0.18], [0.97, 0.94], [0.60, 0.94]]
 
-# QUY TRÌNH SOP CHI TIẾT
+# CÁC BƯỚC THEO DÕI TRÊN GIAO DIỆN WEB DASHBOARD
 steps:
   - step_order: 1
-    step_name: "Đặt SP1 vào hộp giữa"
-    logic: "zone_trigger"
-    active_hand: "any"
-    required_zone: "hop_giua"
-    require_product: true       # Yêu cầu cả TAY và SẢN PHẨM ở hộp giữa
-    min_dwell_sec: 0.3
-    timeout_sec: -1
-
+    step_name: "Lấy phôi chi tiết (Khay phải)"
+    step_label: "step_pick_part"
+    required_zone: "vung_lay"
+    target_screws: 0
   - step_order: 2
-    step_name: "Lấy SP2 từ thùng trên"
-    logic: "zone_trigger"
-    active_hand: "any"
-    required_zone: "thung_tren"
-    require_product: false      # TẮT: Không yêu cầu sản phẩm ở thùng trên (chỉ cần tay)
-    min_dwell_sec: 0.4
-
+    step_name: "Lắp ốc vị trí 1 - 2"
+    step_label: "step_screw_1_2"
+    target_screws: 2
   - step_order: 3
-    step_name: "Lắp SP2 vào hộp giữa"
-    logic: "zone_trigger"
-    active_hand: "any"
-    required_zone: "hop_giua"
-    require_product: true       # BẬT: Yêu cầu cả TAY và SẢN PHẨM ở hộp giữa khi lắp ráp
-    min_dwell_sec: 0.4
-
+    step_name: "Lắp ốc vị trí 3 - 4"
+    step_label: "step_screw_3_4"
+    target_screws: 4
   - step_order: 4
-    step_name: "Đưa thành phẩm vào thùng phải"
-    logic: "zone_trigger"
-    active_hand: "any"
-    required_zone: "thung_phai"
-    require_product: true       # Yêu cầu cả TAY và THÀNH PHẨM ở thùng phải
-    min_dwell_sec: 0.3
+    step_name: "Lắp ốc vị trí 5 - 6"
+    step_label: "step_screw_5_6"
+    target_screws: 6
+  - step_order: 5
+    step_name: "Lắp ốc vị trí 7 - 8"
+    step_label: "step_screw_7_8"
+    target_screws: 8
+  - step_order: 6
+    step_name: "Hoàn tất & Cất chi tiết (Khay trái)"
+    step_label: "step_finish"
+    required_zone: "vung_cat"
+    target_screws: 8
 
 config:
-  violation_tolerance: 5
-  idle_timeout_frames: 120
-  transition_timeout_sec: 25.0
-  min_step_dwell_sec: 0.4
-  restart_allowed_until_step: 0
-  ignore_zones: []
-  # Tắt freeze 2 tay vì 1 tay giữ sản phẩm là bình thường
-  freeze_on_two_hands: false
-  freeze_cooldown_sec: 1.5
-  # Ngưỡng velocity (normalized) để phân biệt tay động vs tay tĩnh
-  # Tay dưới ngưỡng này bị coi là tay giữ → bỏ qua trong FSM
-  active_hand_velocity_threshold: 0.012
+  w: 1280
+  h: 720
+  min_dwell_sec: 0.3
+  max_cycle_time_sec: 21.00

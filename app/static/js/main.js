@@ -8,6 +8,10 @@ const socket = window.socket;
 let violationChart = null;
 let healthInterval = null;
 let statsInterval = null;
+let statsRequestVersion = 0;
+let statsRealtimeTimer = null;
+const statsLastEventByCamera = new Map();
+const productLoadVersions = new WeakMap();
 let pieChart = null;
 let lineChart = null;
 let hourlyChart = null;
@@ -93,6 +97,8 @@ async function loadProducts(stationId = '', selectElementId = 'filter-product') 
     console.log("[DEBUG_UI] loadProducts called with stationId:", stationId, "select:", selectElementId);
     const select = document.getElementById(selectElementId);
     if (!select) return;
+    const loadVersion = (productLoadVersions.get(select) || 0) + 1;
+    productLoadVersions.set(select, loadVersion);
     select.innerHTML = '<option value="">Tất cả mã</option>';
     
     const target = stationId || 'all';
@@ -102,6 +108,7 @@ async function loadProducts(stationId = '', selectElementId = 'filter-product') 
         const response = await fetch(url);
         console.log("[DEBUG_UI] Response status:", response.status);
         const products = await response.json();
+        if (productLoadVersions.get(select) !== loadVersion) return;
         console.log("[DEBUG_UI] Products received:", products);
         products.forEach(prod => {
             const opt = document.createElement('option');
@@ -665,6 +672,8 @@ async function initStatsPage(selectedId = "") {
         const dateVal = dateInput.value;
         const stationVal = stationSelect ? stationSelect.value : "";
         const productVal = productSelect ? productSelect.value : "";
+        const statsGrid = document.querySelector('.stats-grid');
+        if (statsGrid) statsGrid.classList.toggle('show-downtime', stationVal === 'machine_07' && productVal === 'TFF4040');
         const startH = startHourSelect ? startHourSelect.value : "";
         const endH = endHourSelect ? endHourSelect.value : "";
         loadStats(dateVal, stationVal, productVal, startH, endH);
@@ -679,8 +688,10 @@ async function initStatsPage(selectedId = "") {
     dateInput.onchange = triggerRefresh;
     if (stationSelect) {
         stationSelect.onchange = async () => {
-            await loadProducts(stationSelect.value, 'filter-product');
+            const selectedStation = stationSelect.value;
+            const productsLoading = loadProducts(selectedStation, 'filter-product');
             triggerRefresh();
+            await productsLoading;
         };
     }
     if (productSelect) productSelect.onchange = triggerRefresh;
@@ -729,6 +740,7 @@ function formatDowntimeDisplay(secTotal) {
 }
 
 async function loadStats(date, cameraId = "", productId = "", startHour = "", endHour = "") {
+    const requestVersion = ++statsRequestVersion;
     try {
         // Clean up inputs
         if (cameraId === "undefined" || cameraId === "null") cameraId = "";
@@ -740,9 +752,12 @@ async function loadStats(date, cameraId = "", productId = "", startHour = "", en
         if (startHour !== "" && startHour !== null && startHour !== undefined) filter += `&start_hour=${startHour}`;
         if (endHour !== "" && endHour !== null && endHour !== undefined) filter += `&end_hour=${endHour}`;
 
-        // 1. Summary
-        const summaryRes = await fetch(`/api/stats/summary?${filter}`);
-        const summary = await summaryRes.json();
+        // Apply all panels together, and ignore results from older filter selections.
+        const endpoints = ['summary', 'distribution', 'trend', 'hourly'];
+        const responses = await Promise.all(endpoints.map(endpoint => fetch(`/api/stats/${endpoint}?${filter}`)));
+        if (responses.some(response => !response.ok)) throw new Error('Không tải được thống kê');
+        const [summary, distData, trendData, hourlyData] = await Promise.all(responses.map(response => response.json()));
+        if (requestVersion !== statsRequestVersion) return;
         const violEl = document.getElementById('total-violations');
         if (violEl) violEl.innerText = summary.total_violations;
 
@@ -750,7 +765,7 @@ async function loadStats(date, cameraId = "", productId = "", startHour = "", en
         const correctCyclesEl = document.getElementById('correct-cycles');
         if (correctCyclesEl) correctCyclesEl.innerText = correctCycles;
 
-        const totalProds = summary.total_products !== undefined ? summary.total_products : (summary.total_completions * 2);
+        const totalProds = summary.total_products ?? 0;
         const totalProdsEl = document.getElementById('total-products');
         if (totalProdsEl) totalProdsEl.innerText = `${totalProds}/4540`;
 
@@ -766,18 +781,12 @@ async function loadStats(date, cameraId = "", productId = "", startHour = "", en
         }
 
         // 2. Pie Chart (Biểu đồ tròn chi tiết loại lỗi)
-        const distRes = await fetch(`/api/stats/distribution?${filter}`);
-        const distData = await distRes.json();
         renderPieChart(distData);
 
         // 3. Line/Area Chart (Biểu đồ miền xu hướng tuần)
-        const trendRes = await fetch(`/api/stats/trend?${filter}`);
-        const trendData = await trendRes.json();
         renderLineChart(trendData);
 
         // 4. Hourly Area Chart (Biểu đồ miền diễn biến theo thời gian)
-        const hourlyRes = await fetch(`/api/stats/hourly?${filter}`);
-        const hourlyData = await hourlyRes.json();
         renderHourlyChart(hourlyData);
     } catch (err) { console.error(err); }
 }
@@ -1023,11 +1032,12 @@ function renderOverviewGrid(cameras) {
         card.href = cam.redirect_url || `/station/${cam.id}`;
         card.id = `overview-${cam.id}`;
         card.innerHTML = `
-            <div class="overview-header-icon">${illustrationHtml}<div class="status-badge" id="status-badge-${cam.id}">INIT</div></div>
+            <div class="overview-header-icon">${illustrationHtml}<div class="status-badge" id="status-badge-${cam.id}">${cam.monitoring_enabled === false ? 'ĐÃ TẮT' : 'INIT'}</div></div>
             <div class="overview-info">
                 <div class="overview-header"><span class="overview-name">${cam.name}</span><span id="cycle-count-${cam.id}" class="cycle-badge">0</span></div>
-                <div id="step-name-${cam.id}" class="overview-step">Ready</div>
+                <div id="step-name-${cam.id}" class="overview-step">${cam.monitoring_enabled === false ? 'Đã tắt giám sát' : 'Ready'}</div>
                 <div class="progress-bar-container"><div class="progress-bar"><div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div></div></div>
+                ${monitoringButton(cam)}
             </div>
         `;
         grid.appendChild(card);
@@ -1049,7 +1059,7 @@ function renderStationDetail(cam) {
             <div class="info-panel">
                 <div class="station-header">
                     <div class="station-name">${cam.name}</div>
-                    <div id="status-${cam.id}" class="status-indicator">READY</div>
+                    <div id="status-${cam.id}" class="status-indicator">${cam.monitoring_enabled === false ? 'ĐÃ TẮT GIÁM SÁT' : 'READY'}</div>
                 </div>
 
                 <div class="product-selector-box mb-4">
@@ -1058,6 +1068,7 @@ function renderStationDetail(cam) {
                         <option value="">Đang tải mã hàng...</option>
                     </select>
                 </div>
+                ${monitoringButton(cam)}
 
                 <!-- Countdown Banner replacing status-banner -->
                 <div class="countdown-banner state-normal" id="countdown-banner-${cam.id}">
@@ -1077,7 +1088,7 @@ function renderStationDetail(cam) {
                 </div>
 
                 <div class="progress-section">
-                    <div id="step-name-${cam.id}" class="current-step-title">Đang chờ bắt đầu...</div>
+                    <div id="step-name-${cam.id}" class="current-step-title">${cam.monitoring_enabled === false ? 'Đã tắt giám sát' : 'Đang chờ bắt đầu...'}</div>
                     <div class="progress-bar"><div id="progress-${cam.id}" class="progress-fill" style="width: 0%"></div></div>
                 </div>
 
@@ -1106,6 +1117,44 @@ function renderStationDetail(cam) {
     renderSopChecklist(cam.id);
     if (cam.id === 'machine_07') {
         loadStationDowntime(cam.id);
+    }
+}
+
+function monitoringButton(cam) {
+    if (cam.monitoring_enabled === null || cam.monitoring_enabled === undefined) {
+        return '<div class="monitoring-unavailable">Không thể điều khiển giám sát</div>';
+    }
+    const enabled = cam.monitoring_enabled;
+    return `<button type="button" class="monitoring-toggle ${enabled ? 'is-on' : 'is-off'}" data-camera-id="${cam.id}" data-enabled="${enabled}" onclick="toggleMonitoring(event, this)">${enabled ? 'Tắt giám sát' : 'Bật giám sát'}</button>`;
+}
+
+async function toggleMonitoring(event, button) {
+    event.preventDefault();
+    event.stopPropagation();
+    const cameraId = button.dataset.cameraId;
+    const enabled = button.dataset.enabled !== 'true';
+    button.disabled = true;
+    try {
+        const response = await fetch(`/api/station/${encodeURIComponent(cameraId)}/monitoring`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Không đổi được trạng thái');
+        button.dataset.enabled = String(result.monitoring_enabled);
+        button.textContent = result.monitoring_enabled ? 'Tắt giám sát' : 'Bật giám sát';
+        button.classList.toggle('is-on', result.monitoring_enabled);
+        button.classList.toggle('is-off', !result.monitoring_enabled);
+        const status = document.getElementById(`status-${cameraId}`);
+        const step = document.getElementById(`step-name-${cameraId}`);
+        const badge = document.getElementById(`status-badge-${cameraId}`);
+        if (status) status.textContent = result.monitoring_enabled ? 'SẴN SÀNG' : 'ĐÃ TẮT GIÁM SÁT';
+        if (step) step.textContent = result.monitoring_enabled ? 'Đang chờ bắt đầu...' : 'Đã tắt giám sát';
+        if (badge) badge.textContent = result.monitoring_enabled ? 'SẴN SÀNG' : 'ĐÃ TẮT';
+    } catch (error) {
+        alert(error.message);
+    } finally {
+        button.disabled = false;
     }
 }
 
@@ -1304,13 +1353,25 @@ socket.on('step_update', (data) => {
         is_machine_stopped, machine_stopped_duration, stop_count, total_downtime_sec, machine_status
     } = data;
     
-    // --- CẬP NHẬT TRANG THỐNG KÊ REALTIME ---
-    if (data.sop_status === 'completed' || data.sop_status === 'violation') {
+    // --- CẬP NHẬT TRANG THỐNG KÊ & SỰ KIỆN GẦN NHẤT REALTIME ---
+    const statsEventKey = `${cycle_count}:${data.sop_status}`;
+    const statsEventChanged = statsLastEventByCamera.get(camera_id) !== statsEventKey;
+    statsLastEventByCamera.set(camera_id, statsEventKey);
+    if ((data.sop_status === 'completed' || data.sop_status === 'violation') && statsEventChanged) {
         const statsDateInput = document.getElementById('target-date');
-        if (statsDateInput) {
-            const statsStationSelect = document.getElementById('filter-station');
-            const statsProductSelect = document.getElementById('filter-product');
-            loadStats(statsDateInput.value, statsStationSelect ? statsStationSelect.value : "", statsProductSelect ? statsProductSelect.value : "");
+        if (statsDateInput && !statsRealtimeTimer) {
+            statsRealtimeTimer = setTimeout(() => {
+                statsRealtimeTimer = null;
+                const date = document.getElementById('target-date');
+                if (!date) return;
+                const value = id => document.getElementById(id)?.value || "";
+                loadStats(date.value, value('filter-station'), value('filter-product'), value('filter-start-hour'), value('filter-end-hour'));
+            }, 1000);
+        }
+        // Tự động tải lại lịch sử 10 sự kiện gần nhất nếu đang xem trạm này
+        const stationContainer = document.getElementById('station-container');
+        if (stationContainer && stationContainer.getAttribute('data-camera-id') === camera_id) {
+            loadRecentEvents(camera_id);
         }
     }
 
@@ -1589,13 +1650,13 @@ async function updateSystemHealth() {
 socket.on('violation', (data) => {
     const { camera_id, violation_type, expected_step, detected_step, timestamp, clip_path } = data;
     
-    // 1. Hiện thông báo Toast đỏ cực rõ
-    if (typeof showToast === 'function') {
-        showToast(
-            "PHÁT HIỆN VI PHẠM!", 
-            `Trạm ${camera_id}: ${violation_type}. Yêu cầu bước: ${expected_step}`, 
-            "danger"
-        );
+    // Nếu đang ở trang Chi tiết trạm cụ thể, chỉ hiện thông báo vi phạm của chính trạm đó
+    const stationContainer = document.getElementById('station-container');
+    if (stationContainer) {
+        const currentCamId = stationContainer.getAttribute('data-camera-id');
+        if (currentCamId && currentCamId !== camera_id) {
+            return; // Bỏ qua vi phạm của máy khác theo yêu cầu người dùng
+        }
     }
     
     // 2. Hiệu ứng rung đỏ khung hình video

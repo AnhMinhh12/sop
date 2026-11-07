@@ -37,11 +37,11 @@ inference:
 
 models:
   yolo:
-    weights: "shared/models/yolo/laprap.onnx"
-    input_size: 416
+    weights: "shared/models/yolo/laprap_8_oc.onnx"
+    input_size: 640
     fps_cap: 15
     conf_threshold: 0.35
-    iou_threshold: 0.4516
+    iou_threshold: 0.45
 
 cameras:
   - id: "machine_04"
@@ -74,8 +74,6 @@ cameras:
     name: "Máy 7"
     illustration: "/static/illustration/may_7.png"
     rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.47:554/Streaming/Channels/102"
-    #rtsp_url: "data/recordings/08_08_20260808_113003_3min.mp4"
-    #rtsp_url: "shared/tools/data/raw/07_08.mp4"
     sop_file: "projects/sop_monitoring/config/TFF4040.yaml"
     engine_id: "TFF4040"
     allowed_products:
@@ -100,17 +98,18 @@ cameras:
     conf_threshold: 0.35
 
   - id: "machine_08"
-    name: "Máy 8"
+    name: "Máy IN-HOT-LAPRAP"
     illustration: "/static/illustration/may_8.png"
-    rtsp_url: "rtsp://admin:Htmp%402019@192.168.103.18:554/Streaming/Channels/101"
+    rtsp_url: "rtsp://admin:Htmp%402019@10.0.7.243:554/Streaming/Channels/102"
     sop_file: "projects/sop_monitoring/config/laprap.yaml"
     engine_id: "laprap"
     allowed_products:
       - "laprap"
-    yolo_model: "" # Không chạy AI cục bộ tại Hub
-    resolution: [640, 480]
+    yolo_model: "shared/models/yolo/laprap_8_oc.onnx"
+    resolution: [1280, 720]
     fps_cap: 15
-    is_external: true # Nhận frame push trực tiếp từ máy trạm con qua HTTP API
+    conf_threshold: 0.22
+    is_external: false
 
 alerts:
   audio:

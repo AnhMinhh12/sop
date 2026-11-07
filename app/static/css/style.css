@@ -466,6 +466,14 @@ body {
 .recent-event-item.border-l-green-500 { border-left-color: var(--success); background: rgba(16, 185, 129, 0.05); }
 
 /* Sidebar & Navigation Fixes */
+.monitoring-toggle {
+    margin-top: 10px; padding: 8px 14px; border: 1px solid #fdba74;
+    border-radius: 8px; background: #fff7ed; color: #9a3412;
+    font-weight: 700; cursor: pointer;
+}
+.monitoring-toggle.is-off { background: #ecfdf5; color: #047857; border-color: #6ee7b7; }
+.monitoring-toggle:disabled { opacity: .6; cursor: wait; }
+.monitoring-unavailable { margin-top: 10px; color: #64748b; font-size: .8rem; }
 aside {
     width: 280px;
     height: 100vh;
@@ -477,6 +485,28 @@ aside {
     top: 0;
     z-index: 1000;
 }
+
+/* Keep navigation usable even if utility styles fail to load. */
+#main-sidebar > div, #main-sidebar nav a {
+    display: flex;
+    align-items: center;
+}
+#main-sidebar nav a {
+    padding: 0.75rem 1rem;
+    color: #475569;
+    text-decoration: none;
+    border-radius: 0.75rem;
+}
+#main-sidebar nav a:hover { background: #f8fafc; color: var(--primary); }
+#main-sidebar nav a[class*="bg-primary/10"] { background: rgba(37, 99, 235, 0.1); color: var(--primary); }
+#main-sidebar nav svg { width: 20px; height: 20px; flex: 0 0 20px; margin-right: 12px; }
+#main-sidebar > div svg { width: 32px; height: 32px; flex: 0 0 32px; margin-right: 12px; }
+#main-sidebar .sidebar-toggle-btn {
+    position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
+    width: 24px; height: 48px; display: flex; align-items: center; justify-content: center;
+    background: white; border: 1px solid #e2e8f0; border-radius: 9999px; cursor: pointer;
+}
+#sidebar-toggle-icon { width: 16px; height: 16px; }
 
 #main-content-area {
     margin-left: 0;

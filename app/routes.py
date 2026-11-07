@@ -216,7 +216,25 @@ def get_ui_manifest():
 @app.route('/api/cameras')
 def get_cameras():
     config = ConfigLoader.load_config()
-    return jsonify(config.get("cameras", []))
+    cameras = []
+    for camera in config.get("cameras", []):
+        item = dict(camera)
+        processor = processors.get(camera.get("id"))
+        item['monitoring_enabled'] = processor.monitoring_enabled if processor else None
+        cameras.append(item)
+    return jsonify(cameras)
+
+
+@app.route('/api/station/<camera_id>/monitoring', methods=['POST'])
+def set_station_monitoring(camera_id):
+    processor = processors.get(camera_id)
+    if processor is None:
+        return jsonify({"success": False, "error": "Máy chưa kết nối hoặc không hỗ trợ điều khiển giám sát từ đây"}), 404
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data.get('enabled'), bool):
+        return jsonify({"success": False, "error": "Trạng thái giám sát không hợp lệ"}), 400
+    processor.set_monitoring(data['enabled'])
+    return jsonify({"success": True, "monitoring_enabled": processor.monitoring_enabled})
 
 
 @app.route('/api/events')
@@ -419,11 +437,12 @@ def export_stats_excel():
     writer.writerow(['Vi phạm trong ngày:', summary.get('total_violations', 0)])
     writer.writerow(['Tỷ lệ tuân thủ:', f"{summary.get('compliance_rate', 100.0)}%"])
     total_comp = summary.get('correct_cycles', summary.get('total_completions', 0))
-    total_prod = summary.get('total_products', total_comp * 2)
+    total_prod = summary.get('total_products', 0)
     robot_picks = summary.get('robot_pickups', 0)
     writer.writerow(['Số chu kỳ làm đúng:', f"{total_comp} chu kỳ"])
     if robot_picks > 0:
-        writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_prod}/4540 (Số lần robot lấy: {robot_picks})"])
+        writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_prod}/4540"])
+        writer.writerow(['Số lần robot lấy sản phẩm:', robot_picks])
     else:
         writer.writerow(['Tổng sản phẩm hoàn thành:', f"{total_prod}/4540"])
 
