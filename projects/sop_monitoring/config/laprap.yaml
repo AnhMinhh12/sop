@@ -1,8 +1,8 @@
 station_id: "machine_08"
 station_name: "Máy IN-HOT-LAPRAP - laprap"
 target_screws: 8
-missing_dwell_sec: 4.5
-max_cycle_time_sec: 35.0
+missing_dwell_sec: 15.0
+max_cycle_time_sec: 50.0
 
 # ĐỊNH NGHĨA 2 VÙNG ROI: VÙNG CẤT (TRÁI) VÀ VÙNG LẤY (PHẢI)
 zones:
@@ -42,4 +42,4 @@ config:
   w: 1280
   h: 720
   min_dwell_sec: 0.3
-  max_cycle_time_sec: 21.00
+  max_cycle_time_sec: 50.0

@@ -16,10 +16,15 @@ class ProductEngine(BaseEngine):
       - vung_lay: Vùng lấy phôi chi tiết (Khay trong suốt bên phải)
       - vung_cat: Vùng cất thành phẩm hoàn thiện (Khay phân chia bên trái)
       
-    Quy tắc kết thúc chu kỳ chặt chẽ (Chống tính 2 lần):
-      - Đủ 8 ốc -> Thao tác đóng nẹp/xoay chi tiết kiểm tra ở giữa bàn: MẤT HÌNH TUYỆT ĐỐI KHÔNG CHỐT PASS.
-      - Chi tiết phải được di chuyển vào VÙNG CẤT (vung_cat) bên trái.
-      - Công nhân phải rời khỏi 2 tay ở VÙNG CẤT (thả chi tiết/rút tay) -> MỚI CHÍNH THỨC KẾT THÚC CHU KỲ (PASS).
+    Quy tắc quản lý chu kỳ:
+      - Khi công nhân tạm dừng, ngoảnh nói chuyện, lấy đồ:
+        TUYỆT ĐỐI KHÔNG BÁO LỖI (NG), giữ nguyên chu kỳ và tiến độ ốc để công nhân tiếp tục.
+      - Chỉ chốt LỖI (NG) khi:
+        1. Công nhân cất chi tiết thiếu ốc (< 8 ốc) vào VÙNG CẤT thành phẩm bên trái.
+        2. Công nhân bỏ dở chi tiết (1-7 ốc) trên bàn để sang VÙNG LẤY nhặt phôi mới.
+        3. Bỏ rơi trạm quá thời gian tối đa (> 50s và vắng mặt > 20s).
+      - Chỉ chốt PASS khi:
+        Đã đủ 8 ốc, đưa vào VÙNG CẤT và buông 2 tay khỏi chi tiết.
     """
     def __init__(self, sop_config: Dict[str, Any]):
         self.station_id = sop_config.get("station_id", "machine_08")
@@ -28,12 +33,12 @@ class ProductEngine(BaseEngine):
         self.sop_steps = sop_config.get("steps", [])
         self.config = sop_config.get("config", {"w": 1280, "h": 720})
         self.product_id = "laprap"
-        self.custom_draw_zones = True  # Cho phép tự vẽ vùng ROI trực quan theo phong cách hiện đại
+        self.custom_draw_zones = True  # Tự vẽ vùng ROI trực quan theo phong cách hiện đại
         
         # Cấu hình chu kỳ
         self.target_screws = int(sop_config.get("target_screws", 8))
-        self.missing_dwell_sec = float(sop_config.get("missing_dwell_sec", 4.5))
-        self.max_cycle_time = float(sop_config.get("config", {}).get("max_cycle_time_sec") or sop_config.get("max_cycle_time_sec", 35.0))
+        self.missing_dwell_sec = float(sop_config.get("missing_dwell_sec", 15.0))
+        self.max_cycle_time = float(sop_config.get("config", {}).get("max_cycle_time_sec") or sop_config.get("max_cycle_time_sec", 50.0))
         
         # State machine
         self.state = "IDLE"  # "IDLE", "ASSEMBLING", "COMPLETED", "VIOLATION"
@@ -58,8 +63,9 @@ class ProductEngine(BaseEngine):
         self.last_seen_lay_time = 0.0
         self.last_seen_cat_time = 0.0
         
-        # Tracking điều kiện chốt hoàn thành: Đã vào vùng trái và rời khỏi 2 tay
+        # Tracking điều kiện chốt hoàn thành trong vung_cat
         self.entered_cat_zone = False
+        self.entered_cat_incomplete = False
         self.cat_release_start = 0.0
         
         # Tracking chuyển động để lọc găng tay tĩnh (Static Glove Filter)
@@ -85,7 +91,7 @@ class ProductEngine(BaseEngine):
         self.last_absent_duration = 999.0
         self.last_completed_time = 0.0
         
-        logger.info(f"ProductEngine [laprap]: Initialized with strict vung_cat release logic (Target: {self.target_screws} screws)")
+        logger.info(f"ProductEngine [laprap]: Initialized (Target: {self.target_screws} screws, Max cycle: {self.max_cycle_time}s)")
 
     def _is_point_in_zone(self, point: tuple, zone_name: str) -> bool:
         """Kiểm tra tọa độ normalized (x, y) có nằm trong polygon của zone không."""
@@ -244,12 +250,15 @@ class ProductEngine(BaseEngine):
             visible_screws = sum(len(tier_screws[t]) for t in range(4))
             has_all_screws = (self.has_completed_screws or visible_screws >= self.target_screws or sum(self.slots) >= self.target_screws)
 
-            # Đánh dấu KHI VÀ CHỈ KHI sản phẩm đã đủ 8 ốc và đã thực sự di chuyển vào VÙNG CẤT (vung_cat)
-            if self.state == "ASSEMBLING" and has_all_screws:
+            # Đánh dấu chi tiết vào VÙNG CẤT (vung_cat) bên trái
+            if self.state == "ASSEMBLING":
                 if self.in_vung_cat or part_in_cat:
-                    self.entered_cat_zone = True
+                    if has_all_screws:
+                        self.entered_cat_zone = True
+                    elif 1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws:
+                        self.entered_cat_incomplete = True
 
-            # TRƯỜNG HỢP 1: Khi đã vào VÙNG CẤT (vung_cat), PHẢI RỜI KHỎI 2 TAY MỚI CHỐT PASS
+            # TRƯỜNG HỢP 1A: Chi tiết ĐỦ 8 ỐC vào VÙNG CẤT -> Chờ buông 2 tay mới chốt PASS
             if self.state == "ASSEMBLING" and self.entered_cat_zone:
                 hands_released = (not has_hand_holding) or (not hand_in_cat)
                 
@@ -268,15 +277,53 @@ class ProductEngine(BaseEngine):
                         self.banner_until = now + 1.5
                         self.last_completed_time = now
                         self.entered_cat_zone = False
+                        self.entered_cat_incomplete = False
                         self.cat_release_start = 0.0
                         logger.info(f"ProductEngine [laprap]: Cycle #{self.cycle_count} PASS -> Released hands in vung_cat.")
                 else:
-                    # Công nhân vẫn đang cầm 2 tay ở vùng cất -> chưa buông tay, giữ nguyên chu kỳ
                     self.cat_release_start = 0.0
                     self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang cất khay trái - Chờ buông 2 tay..."
 
+            # TRƯỜNG HỢP 1B: Chi tiết THIẾU ỐC (<8 ốc) mà công nhân đã cất vào VÙNG CẤT và buông tay -> VI PHẠM (NG)
+            elif self.state == "ASSEMBLING" and self.entered_cat_incomplete:
+                hands_released = (not has_hand_holding) or (not hand_in_cat)
+                if hands_released:
+                    curr_count = max(sum(self.slots), self.max_simultaneous)
+                    self.total_ng += 1
+                    self.last_cycle_duration = round(now - self.cycle_start_time, 1)
+                    self.state = "VIOLATION"
+                    self.sop_status = "violation"
+                    self.is_failed = True
+                    self.violation_type = f"Thiếu ốc ({curr_count}/{self.target_screws}) đã cất khay trái"
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: NG - Thiếu ốc ({curr_count}/{self.target_screws})"
+                    self.last_result_banner = (f"CHU KY #{self.cycle_count}: THIEU OC ({curr_count}/{self.target_screws})", False)
+                    self.banner_until = now + 2.5
+                    self.last_completed_time = now
+                    self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
+                    self.cat_release_start = 0.0
+                    logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - Incomplete stored in vung_cat.")
+
+            # TRƯỜNG HỢP 1C: Đang lắp dở (1-7 ốc) mà công nhân lại sang VÙNG LẤY lấy phôi mới -> Bỏ dở chi tiết (NG)
+            elif self.state == "ASSEMBLING" and (1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws) and hand_in_lay and self.in_vung_lay and visible_screws <= 2 and self.part_present_streak >= 3:
+                curr_count = max(sum(self.slots), self.max_simultaneous)
+                self.total_ng += 1
+                self.last_cycle_duration = round(now - self.cycle_start_time, 1)
+                self.state = "VIOLATION"
+                self.sop_status = "violation"
+                self.is_failed = True
+                self.violation_type = f"Bỏ dở chi tiết ({curr_count}/{self.target_screws} ốc)"
+                self.status_msg = f"Chu kỳ #{self.cycle_count}: Bỏ dở chi tiết ({curr_count}/{self.target_screws} ốc)"
+                self.last_result_banner = (f"CHU KY #{self.cycle_count}: BO DO ({curr_count}/{self.target_screws} OC)", False)
+                self.banner_until = now + 2.5
+                self.last_completed_time = now
+                self.entered_cat_zone = False
+                self.entered_cat_incomplete = False
+                self.cat_release_start = 0.0
+                logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - Abandoned in center to take new part.")
+
             # TRƯỜNG HỢP 2: Bắt đầu chu kỳ mới từ IDLE / COMPLETED / VIOLATION
-            # Tuyệt đối không mở chu kỳ mới khi vật thể/tay đang ở trong VÙNG CẤT (vung_cat)
+            # Yêu cầu: Phôi mới (<= 2 ốc) VÀ (phải được lấy từ vung_lay HOẶC đang có thao tác cầm nắm chuyển động thực tế)
             elif self.state in ["IDLE", "COMPLETED", "VIOLATION"] and self.part_present_streak >= 3:
                 if self.in_vung_cat or self.entered_cat_zone:
                     self.status_msg = "Sẵn sàng (Chờ lấy phôi từ khay phải)"
@@ -300,6 +347,7 @@ class ProductEngine(BaseEngine):
                         self.banner_until = 0.0
                         self.last_result_banner = None
                         self.entered_cat_zone = False
+                        self.entered_cat_incomplete = False
                         self.cat_release_start = 0.0
                         self.current_step_idx = 1
                         self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc (0/{self.target_screws})"
@@ -383,8 +431,7 @@ class ProductEngine(BaseEngine):
             self.part_present_streak = 0
             self.last_screws_on_part = []
             
-            # TRƯỜNG HỢP DUY NHẤT ĐƯỢC CHỐT PASS KHI MẤT HÌNH:
-            # ĐÃ VÀO VÙNG CẤT THÀNH PHẨM (vung_cat) VÀ BUÔNG TAY THẢ VÀO KHAY!
+            # TRƯỜNG HỢP A: ĐÃ VÀO VÙNG CẤT THÀNH PHẨM (vung_cat) VÀ BUÔNG TAY THẢ VÀO KHAY -> PASS!
             if self.state == "ASSEMBLING" and self.entered_cat_zone:
                 if self.cat_release_start == 0.0:
                     self.cat_release_start = now
@@ -400,17 +447,17 @@ class ProductEngine(BaseEngine):
                     self.banner_until = now + 1.5
                     self.last_completed_time = now
                     self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
                     self.cat_release_start = 0.0
                     logger.info(f"ProductEngine [laprap]: Cycle #{self.cycle_count} PASS -> Absent after vung_cat.")
             
-            # NẾU ĐÃ ĐỦ 8 ỐC NHƯNG CHƯA VÀO VÙNG CẤT (ĐANG XOAY/KIỂM TRA/ĐÓNG NẸP Ở GIỮA BÀN):
-            # TUYỆT ĐỐI KHÔNG CHỐT PASS! GIỮ NGUYÊN CHU KỲ CHỜ ĐƯA VÀO KHAY TRÁI!
+            # TRƯỜNG HỢP B: ĐÃ ĐỦ 8 ỐC NHƯNG ĐANG XOAY/ĐÓNG NẸP Ở GIỮA BÀN -> TUYỆT ĐỐI KHÔNG CHỐT PASS, KHÔNG BÁO LỖI!
             elif self.state == "ASSEMBLING" and self.has_completed_screws:
                 self.status_msg = f"Chu kỳ #{self.cycle_count}: Đủ 8 ốc - Đóng nẹp & Đưa sang khay trái"
             
-            # NẾU 0 ỐC: Vắng bóng 1.2s -> Reset IDLE (không tính lỗi NG)
+            # TRƯỜNG HỢP C: 0 ỐC: Vắng bóng 1.5s -> Reset IDLE (không tính lỗi NG)
             elif self.state == "ASSEMBLING" and max(sum(self.slots), self.max_simultaneous) == 0:
-                if now - self.last_seen_part_time >= 1.2:
+                if now - self.last_seen_part_time >= 1.5:
                     self.state = "IDLE"
                     self.sop_status = "idle"
                     self.is_failed = False
@@ -423,27 +470,15 @@ class ProductEngine(BaseEngine):
                     self.tier_history = {0: [], 1: [], 2: [], 3: []}
                     self.max_simultaneous = 0
                     self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
                     self.cat_release_start = 0.0
                     logger.info(f"ProductEngine [laprap]: Cycle #{self.cycle_count} reset to IDLE (0 screws).")
                     
-            # NẾU 1-7 ỐC: Chỉ chốt lỗi khi chu kỳ kéo dài >= 12.0s VÀ vắng bóng liên tục >= 4.5s
-            elif self.state == "ASSEMBLING" and (now - self.last_seen_part_time >= self.missing_dwell_sec):
-                final_screw_count = max(sum(self.slots), self.max_simultaneous)
-                self.last_cycle_duration = round(now - self.cycle_start_time, 1)
-                
-                if 1 <= final_screw_count < self.target_screws and self.last_cycle_duration >= 12.0:
-                    self.total_ng += 1
-                    self.state = "VIOLATION"
-                    self.sop_status = "violation"
-                    self.is_failed = True
-                    self.violation_type = f"Thiếu ốc ({final_screw_count}/{self.target_screws})"
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Thiếu ốc ({final_screw_count}/{self.target_screws})"
-                    self.last_result_banner = (f"CHU KY #{self.cycle_count}: THIEU OC ({final_screw_count}/{self.target_screws})", False)
-                    self.banner_until = now + 2.0
-                    self.last_completed_time = now
-                    self.entered_cat_zone = False
-                    self.cat_release_start = 0.0
-                    logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - {self.violation_type}")
+            # TRƯỜNG HỢP D: 1-7 ỐC ĐANG LẮP MÀ TẠM DỪNG (NGOẢNH NÓI CHUYỆN, ĐẶT XUỐNG BÀN, LẤY ỐC):
+            # TUYỆT ĐỐI KHÔNG BÁO LỖI (KHÔNG TÍNH NG), GIỮ NGUYÊN CHU KỲ VÀ SLOTS ĐỂ CÔNG NHÂN QUAY LẠI LẮP TIẾP!
+            elif self.state == "ASSEMBLING" and (1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws):
+                curr_count = max(sum(self.slots), self.max_simultaneous)
+                self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang tạm dừng ({curr_count}/{self.target_screws} ốc)"
                     
         # Kiểm tra quá thời gian tối đa chu kỳ (Timeout)
         if self.state == "ASSEMBLING" and (now - self.cycle_start_time > self.max_cycle_time):
@@ -463,11 +498,10 @@ class ProductEngine(BaseEngine):
                 self.tier_history = {0: [], 1: [], 2: [], 3: []}
                 self.max_simultaneous = 0
                 self.entered_cat_zone = False
+                self.entered_cat_incomplete = False
                 self.cat_release_start = 0.0
                 logger.info(f"ProductEngine [laprap]: Cycle #{self.cycle_count} timeout with 0 screws -> reset to IDLE (NO NG).")
             elif final_screw_count >= self.target_screws or self.has_completed_screws:
-                # Đã xong 8 ốc nhưng đang kiểm tra/đóng nẹp kéo dài:
-                # KHÔNG CHỐT PASS SỚM KHI CHƯA VÀO VÙNG CẤT, KHÔNG TÍNH LỖI!
                 if self.entered_cat_zone:
                     self.total_good += 1
                     self.state = "COMPLETED"
@@ -478,21 +512,28 @@ class ProductEngine(BaseEngine):
                     self.banner_until = now + 1.8
                     self.last_completed_time = now
                     self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
                     self.cat_release_start = 0.0
                 else:
                     self.status_msg = f"Chu kỳ #{self.cycle_count}: Đủ 8 ốc - Chờ cất vào khay trái"
             else:
-                self.total_ng += 1
-                self.state = "VIOLATION"
-                self.sop_status = "violation"
-                self.is_failed = True
-                self.violation_type = f"Quá thời gian ({final_screw_count}/{self.target_screws} ốc)"
-                self.status_msg = f"Chu kỳ #{self.cycle_count}: Quá thời gian ({final_screw_count}/{self.target_screws} ốc)"
-                self.last_result_banner = (f"CHU KY #{self.cycle_count}: QUA GIO ({final_screw_count}/{self.target_screws} OC)", False)
-                self.banner_until = now + 2.5
-                self.last_completed_time = now
-                self.entered_cat_zone = False
-                self.cat_release_start = 0.0
+                # Chỉ chốt quá thời gian nếu công nhân đã thực sự bỏ đi khỏi trạm (vắng mặt liên tục > 20s)
+                if now - self.last_seen_part_time >= 20.0:
+                    self.total_ng += 1
+                    self.state = "VIOLATION"
+                    self.sop_status = "violation"
+                    self.is_failed = True
+                    self.violation_type = f"Quá thời gian ({final_screw_count}/{self.target_screws} ốc)"
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Quá thời gian ({final_screw_count}/{self.target_screws} ốc)"
+                    self.last_result_banner = (f"CHU KY #{self.cycle_count}: QUA GIO ({final_screw_count}/{self.target_screws} OC)", False)
+                    self.banner_until = now + 2.5
+                    self.last_completed_time = now
+                    self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
+                    self.cat_release_start = 0.0
+                    logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} TIMEOUT VIOLATION (absent > 20s).")
+                else:
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang tiếp tục lắp ({final_screw_count}/{self.target_screws} ốc)"
                     
         return self.get_status()
 
@@ -521,6 +562,7 @@ class ProductEngine(BaseEngine):
             self.tier_history = {0: [], 1: [], 2: [], 3: []}
             self.max_simultaneous = 0
             self.entered_cat_zone = False
+            self.entered_cat_incomplete = False
             self.cat_release_start = 0.0
 
         cycle_elapsed = (now - self.cycle_start_time) if self.state == "ASSEMBLING" else (
@@ -542,7 +584,10 @@ class ProductEngine(BaseEngine):
             step_states = [i < step_idx for i in range(6)]
             if step_idx < 5:
                 expected_step = step_names[step_idx]
-                detected_label = f"Đã lắp {screw_count}/{self.target_screws} ốc"
+                if now - self.last_seen_part_time >= 2.0 and screw_count > 0:
+                    detected_label = f"Tạm dừng (đã lắp {screw_count}/{self.target_screws} ốc)"
+                else:
+                    detected_label = f"Đã lắp {screw_count}/{self.target_screws} ốc"
             else:
                 expected_step = "Hoàn tất & Cất chi tiết (Khay trái)"
                 if self.entered_cat_zone:
@@ -613,6 +658,7 @@ class ProductEngine(BaseEngine):
         self.in_vung_lay = False
         self.in_vung_cat = False
         self.entered_cat_zone = False
+        self.entered_cat_incomplete = False
         self.cat_release_start = 0.0
         self.pos_history = []
 
@@ -698,6 +744,10 @@ class ProductEngine(BaseEngine):
             elif self.has_completed_screws:
                 state_color = (16, 220, 160)
                 state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: DU 8 OC - DUA SANG KHAY TRAI"
+            elif now - self.last_seen_part_time >= 2.0 and max(sum(self.slots), self.max_simultaneous) > 0:
+                state_color = (255, 180, 50)
+                curr_count = max(sum(self.slots), self.max_simultaneous)
+                state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: DANG TAM DUNG ({curr_count}/{self.target_screws} OC)"
             else:
                 state_color = (0, 220, 255)
                 state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: DANG LAP RAP"
