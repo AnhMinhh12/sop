@@ -48,7 +48,7 @@ class ProductEngine(BaseEngine):
         
         # Dữ liệu chu kỳ hiện tại
         self.slots = [False] * self.target_screws
-        self.tier_history = {0: [], 1: [], 2: [], 3: []}
+        self.slot_hits = [0] * self.target_screws  # Bộ đếm xác nhận: chỉ chốt slot khi xuất hiện ổn định (>= 3 frames)
         self.has_completed_screws = False
         self.max_simultaneous = 0
         self.cycle_start_time = 0.0
@@ -149,7 +149,9 @@ class ProductEngine(BaseEngine):
                     part_hand_box = b
                     part_hand_score = conf
             elif c == "screw":
-                screws.append((b, conf))
+                # Lọc độ tin cậy >= 0.35 để loại bỏ nhiễu lỗ phôi trống, phản xạ ánh kim và găng tay trắng
+                if conf >= 0.35:
+                    screws.append((b, conf))
                 
         # 2. Kiểm tra bàn tay công nhân tương tác với chi tiết
         has_hand_holding = False
@@ -251,12 +253,19 @@ class ProductEngine(BaseEngine):
             has_all_screws = (self.has_completed_screws or visible_screws >= self.target_screws or sum(self.slots) >= self.target_screws)
 
             # Đánh dấu chi tiết vào VÙNG CẤT (vung_cat) bên trái
+            # CHỈ kích hoạt khi chính bounding box của chi tiết (part_hand) nằm trong khay cất
             if self.state == "ASSEMBLING":
-                if self.in_vung_cat or part_in_cat:
+                if part_in_cat:
                     if has_all_screws:
                         self.entered_cat_zone = True
-                    elif 1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws:
+                    elif max(sum(self.slots), self.max_simultaneous) > 0:
                         self.entered_cat_incomplete = True
+                else:
+                    # Chi tiết đang ở giữa bàn làm việc hoặc vùng lấy -> Đang lắp ráp bình thường!
+                    # Hủy bỏ ngay cờ cất nếu chi tiết quay lại hoặc đang ở trên bàn
+                    self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
+                    self.cat_release_start = 0.0
 
             # TRƯỜNG HỢP 1A: Chi tiết ĐỦ 8 ỐC vào VÙNG CẤT -> Chờ buông 2 tay mới chốt PASS
             if self.state == "ASSEMBLING" and self.entered_cat_zone:
@@ -285,47 +294,36 @@ class ProductEngine(BaseEngine):
                     self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang cất khay trái - Chờ buông 2 tay..."
 
             # TRƯỜNG HỢP 1B: Chi tiết THIẾU ỐC (<8 ốc) mà công nhân đã cất vào VÙNG CẤT và buông tay -> VI PHẠM (NG)
+            # CHỈ BẮT LỖI KHI HẾT CHU KỲ (ĐÃ CẤT VÀO KHAY TRÁI VÀ BUÔNG TAY >= 0.35s)
             elif self.state == "ASSEMBLING" and self.entered_cat_incomplete:
                 hands_released = (not has_hand_holding) or (not hand_in_cat)
                 if hands_released:
-                    curr_count = max(sum(self.slots), self.max_simultaneous)
-                    self.total_ng += 1
-                    self.last_cycle_duration = round(now - self.cycle_start_time, 1)
-                    self.state = "VIOLATION"
-                    self.sop_status = "violation"
-                    self.is_failed = True
-                    self.violation_type = f"Thiếu ốc ({curr_count}/{self.target_screws}) đã cất khay trái"
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: NG - Thiếu ốc ({curr_count}/{self.target_screws})"
-                    self.last_result_banner = (f"CHU KY #{self.cycle_count}: THIEU OC ({curr_count}/{self.target_screws})", False)
-                    self.banner_until = now + 2.5
-                    self.last_completed_time = now
-                    self.entered_cat_zone = False
-                    self.entered_cat_incomplete = False
+                    if self.cat_release_start == 0.0:
+                        self.cat_release_start = now
+                    if now - self.cat_release_start >= 0.35:
+                        curr_count = max(sum(self.slots), self.max_simultaneous)
+                        self.total_ng += 1
+                        self.last_cycle_duration = round(now - self.cycle_start_time, 1)
+                        self.state = "VIOLATION"
+                        self.sop_status = "violation"
+                        self.is_failed = True
+                        self.violation_type = f"Thiếu ốc ({curr_count}/{self.target_screws}) đã cất khay trái"
+                        self.status_msg = f"Chu kỳ #{self.cycle_count}: NG - Thiếu ốc ({curr_count}/{self.target_screws})"
+                        self.last_result_banner = (f"CHU KY #{self.cycle_count}: THIEU OC ({curr_count}/{self.target_screws})", False)
+                        self.banner_until = now + 2.5
+                        self.last_completed_time = now
+                        self.entered_cat_zone = False
+                        self.entered_cat_incomplete = False
+                        self.cat_release_start = 0.0
+                        logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - Incomplete stored in vung_cat.")
+                else:
                     self.cat_release_start = 0.0
-                    logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - Incomplete stored in vung_cat.")
-
-            # TRƯỜNG HỢP 1C: Đang lắp dở (1-7 ốc) mà công nhân lại sang VÙNG LẤY lấy phôi mới -> Bỏ dở chi tiết (NG)
-            elif self.state == "ASSEMBLING" and (1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws) and hand_in_lay and self.in_vung_lay and visible_screws <= 2 and self.part_present_streak >= 3:
-                curr_count = max(sum(self.slots), self.max_simultaneous)
-                self.total_ng += 1
-                self.last_cycle_duration = round(now - self.cycle_start_time, 1)
-                self.state = "VIOLATION"
-                self.sop_status = "violation"
-                self.is_failed = True
-                self.violation_type = f"Bỏ dở chi tiết ({curr_count}/{self.target_screws} ốc)"
-                self.status_msg = f"Chu kỳ #{self.cycle_count}: Bỏ dở chi tiết ({curr_count}/{self.target_screws} ốc)"
-                self.last_result_banner = (f"CHU KY #{self.cycle_count}: BO DO ({curr_count}/{self.target_screws} OC)", False)
-                self.banner_until = now + 2.5
-                self.last_completed_time = now
-                self.entered_cat_zone = False
-                self.entered_cat_incomplete = False
-                self.cat_release_start = 0.0
-                logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION - Abandoned in center to take new part.")
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang cất khay trái - Chờ buông 2 tay..."
 
             # TRƯỜNG HỢP 2: Bắt đầu chu kỳ mới từ IDLE / COMPLETED / VIOLATION
             # Yêu cầu: Phôi mới (<= 2 ốc) VÀ (phải được lấy từ vung_lay HOẶC đang có thao tác cầm nắm chuyển động thực tế)
             elif self.state in ["IDLE", "COMPLETED", "VIOLATION"] and self.part_present_streak >= 3:
-                if self.in_vung_cat or self.entered_cat_zone:
+                if self.in_vung_cat or self.entered_cat_zone or part_in_cat:
                     self.status_msg = "Sẵn sàng (Chờ lấy phôi từ khay phải)"
                 else:
                     is_fresh_part = (visible_screws <= 2)
@@ -339,7 +337,7 @@ class ProductEngine(BaseEngine):
                         self.cycle_start_time = now
                         self.last_cycle_duration = 0.0
                         self.slots = [False] * self.target_screws
-                        self.tier_history = {0: [], 1: [], 2: [], 3: []}
+                        self.slot_hits = [0] * self.target_screws
                         self.has_completed_screws = False
                         self.max_simultaneous = 0
                         self.is_failed = False
@@ -358,7 +356,7 @@ class ProductEngine(BaseEngine):
                         else:
                             self.status_msg = "Sẵn sàng (Chờ lấy phôi từ khay phải)"
 
-            # Gán slot cho từng con ốc theo 2D Tier Accumulator (Trái / Phải)
+            # Gán slot cho từng con ốc theo 2D Tier Accumulator (Trái / Phải) với bộ lọc xác nhận chống nhiễu
             for t in range(4):
                 s_list = tier_screws[t]
                 slot_base = t * 2
@@ -371,28 +369,21 @@ class ProductEngine(BaseEngine):
                         current_frame_screws_on_part.append((extra[0], extra[1], slot_base + 1))
                         
                     if self.state == "ASSEMBLING":
-                        self.slots[slot_base] = True
-                        self.slots[slot_base + 1] = True
-                        self.tier_history[t].append(s_list[0][2])
-                        self.tier_history[t].append(s_list[1][2])
+                        self.slot_hits[slot_base] += 1
+                        self.slot_hits[slot_base + 1] += 1
+                        if self.slot_hits[slot_base] >= 3:
+                            self.slots[slot_base] = True
+                        if self.slot_hits[slot_base + 1] >= 3:
+                            self.slots[slot_base + 1] = True
                 elif len(s_list) == 1:
                     rel_lat = s_list[0][2]
                     assigned_slot = slot_base if rel_lat < 0.65 else (slot_base + 1)
+                    current_frame_screws_on_part.append((s_list[0][0], s_list[0][1], assigned_slot))
                     
                     if self.state == "ASSEMBLING":
-                        if len(self.tier_history[t]) > 0:
-                            dist_to_prev = [abs(rel_lat - prev_x) for prev_x in self.tier_history[t]]
-                            if min(dist_to_prev) > 0.12:
-                                assigned_slot = (slot_base + 1) if self.slots[slot_base] else slot_base
-                                self.slots[slot_base] = True
-                                self.slots[slot_base + 1] = True
-                            else:
-                                self.slots[assigned_slot] = True
-                        else:
+                        self.slot_hits[assigned_slot] += 1
+                        if self.slot_hits[assigned_slot] >= 3:
                             self.slots[assigned_slot] = True
-                        self.tier_history[t].append(rel_lat)
-                        
-                    current_frame_screws_on_part.append((s_list[0][0], s_list[0][1], assigned_slot))
 
             self.last_screws_on_part = current_frame_screws_on_part
             
@@ -450,8 +441,29 @@ class ProductEngine(BaseEngine):
                     self.entered_cat_incomplete = False
                     self.cat_release_start = 0.0
                     logger.info(f"ProductEngine [laprap]: Cycle #{self.cycle_count} PASS -> Absent after vung_cat.")
+
+            # TRƯỜNG HỢP B: ĐÃ VÀO VÙNG CẤT (vung_cat) NHƯNG THIẾU ỐC VÀ BUÔNG TAY -> NG (HẾT CHU KỲ)!
+            elif self.state == "ASSEMBLING" and self.entered_cat_incomplete:
+                if self.cat_release_start == 0.0:
+                    self.cat_release_start = now
+                if now - self.cat_release_start >= 0.35:
+                    curr_count = max(sum(self.slots), self.max_simultaneous)
+                    self.total_ng += 1
+                    self.last_cycle_duration = round(now - self.cycle_start_time, 1)
+                    self.state = "VIOLATION"
+                    self.sop_status = "violation"
+                    self.is_failed = True
+                    self.violation_type = f"Thiếu ốc ({curr_count}/{self.target_screws}) đã cất khay trái"
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: NG - Thiếu ốc ({curr_count}/{self.target_screws})"
+                    self.last_result_banner = (f"CHU KY #{self.cycle_count}: THIEU OC ({curr_count}/{self.target_screws})", False)
+                    self.banner_until = now + 2.5
+                    self.last_completed_time = now
+                    self.entered_cat_zone = False
+                    self.entered_cat_incomplete = False
+                    self.cat_release_start = 0.0
+                    logger.warning(f"ProductEngine [laprap]: Cycle #{self.cycle_count} VIOLATION -> Absent after vung_cat (incomplete).")
             
-            # TRƯỜNG HỢP B: ĐÃ ĐỦ 8 ỐC NHƯNG ĐANG XOAY/ĐÓNG NẸP Ở GIỮA BÀN -> TUYỆT ĐỐI KHÔNG CHỐT PASS, KHÔNG BÁO LỖI!
+            # TRƯỜNG HỢP C: ĐÃ ĐỦ 8 ỐC NHƯNG ĐANG XOAY/ĐÓNG NẸP Ở GIỮA BÀN -> TUYỆT ĐỐI KHÔNG CHỐT PASS, KHÔNG BÁO LỖI!
             elif self.state == "ASSEMBLING" and self.has_completed_screws:
                 self.status_msg = f"Chu kỳ #{self.cycle_count}: Đủ 8 ốc - Đóng nẹp & Đưa sang khay trái"
             
@@ -467,7 +479,7 @@ class ProductEngine(BaseEngine):
                     self.banner_until = 0.0
                     self.last_result_banner = None
                     self.slots = [False] * self.target_screws
-                    self.tier_history = {0: [], 1: [], 2: [], 3: []}
+                    self.slot_hits = [0] * self.target_screws
                     self.max_simultaneous = 0
                     self.entered_cat_zone = False
                     self.entered_cat_incomplete = False
@@ -495,7 +507,7 @@ class ProductEngine(BaseEngine):
                 self.banner_until = 0.0
                 self.last_result_banner = None
                 self.slots = [False] * self.target_screws
-                self.tier_history = {0: [], 1: [], 2: [], 3: []}
+                self.slot_hits = [0] * self.target_screws
                 self.max_simultaneous = 0
                 self.entered_cat_zone = False
                 self.entered_cat_incomplete = False
@@ -559,7 +571,7 @@ class ProductEngine(BaseEngine):
             self.current_step_idx = 0
             self.last_result_banner = None
             self.slots = [False] * self.target_screws
-            self.tier_history = {0: [], 1: [], 2: [], 3: []}
+            self.slot_hits = [0] * self.target_screws
             self.max_simultaneous = 0
             self.entered_cat_zone = False
             self.entered_cat_incomplete = False
@@ -639,7 +651,7 @@ class ProductEngine(BaseEngine):
         self.state = "IDLE"
         self.sop_status = "idle"
         self.slots = [False] * self.target_screws
-        self.tier_history = {0: [], 1: [], 2: [], 3: []}
+        self.slot_hits = [0] * self.target_screws
         self.max_simultaneous = 0
         self.part_present_streak = 0
         self.cycle_start_time = 0.0

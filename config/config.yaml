@@ -108,7 +108,7 @@ cameras:
     yolo_model: "shared/models/yolo/laprap_8_oc.onnx"
     resolution: [1280, 720]
     fps_cap: 15
-    conf_threshold: 0.22
+    conf_threshold: 0.35
     is_external: false
 
 alerts:

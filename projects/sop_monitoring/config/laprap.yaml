@@ -2,12 +2,15 @@ station_id: "machine_08"
 station_name: "Máy IN-HOT-LAPRAP - laprap"
 target_screws: 8
 missing_dwell_sec: 15.0
-max_cycle_time_sec: 50.0
+max_cycle_time_sec: 60.0
 
 # ĐỊNH NGHĨA 2 VÙNG ROI: VÙNG CẤT (TRÁI) VÀ VÙNG LẤY (PHẢI)
+# vung_cat: x từ 0.02 đến 0.30 (khay cất bên trái)
+# vung_lay: x từ 0.65 đến 0.97 (khay phôi bên phải)
+# Khu vực làm việc giữa bàn rộng rãi từ 0.30 đến 0.65
 zones:
-  vung_cat: [[0.02, 0.11], [0.36, 0.11], [0.36, 0.94], [0.02, 0.94]]
-  vung_lay: [[0.60, 0.18], [0.97, 0.18], [0.97, 0.94], [0.60, 0.94]]
+  vung_cat: [[0.02, 0.11], [0.30, 0.11], [0.30, 0.94], [0.02, 0.94]]
+  vung_lay: [[0.65, 0.18], [0.97, 0.18], [0.97, 0.94], [0.65, 0.94]]
 
 # CÁC BƯỚC THEO DÕI TRÊN GIAO DIỆN WEB DASHBOARD
 steps:
@@ -42,4 +45,4 @@ config:
   w: 1280
   h: 720
   min_dwell_sec: 0.3
-  max_cycle_time_sec: 50.0
+  max_cycle_time_sec: 60.0
