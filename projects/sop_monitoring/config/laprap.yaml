@@ -45,4 +45,4 @@ config:
   w: 1280
   h: 720
   min_dwell_sec: 0.3
-  max_cycle_time_sec: 60.0
+  max_cycle_time_sec: 22.0
