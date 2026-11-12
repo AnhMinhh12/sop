@@ -15,8 +15,9 @@ production_counter:
 # ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
 zones:
   # --- Tọa độ Camera thực tế ---
-  mold: [[0.377, 0.711], [0.544, 0.547], [0.675, 0.786], [0.505, 0.992]]
-  button_right: [[0.233, 0.733], [0.27, 0.706], [0.291, 0.758], [0.25, 0.792]]
+  mold: [[0.364, 0.706], [0.545, 0.517], [0.694, 0.781], [0.475, 1.0], [0.475, 1.0]]
+  # Nới rộng vùng nút bấm button_right để công nhân bấm là nhận ngay
+  button_right: [[0.205, 0.700], [0.300, 0.670], [0.325, 0.795], [0.220, 0.825]]
   middle_table: [[0.345, 0.456], [0.452, 0.378], [0.486, 0.439], [0.377, 0.528]]
   # Vùng tham chiếu để chọn 2 tay gần nhất (bao quanh mold + middle_table)
   work_area: [[0.164, 0.519], [0.589, 0.231], [0.97, 0.572], [0.389, 0.978]]
