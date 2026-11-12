@@ -1,9 +1,10 @@
 import time
+import math
 import logging
 import os
 import cv2
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from projects.sop_monitoring.core.engines.base_engine import BaseEngine
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,15 @@ class ProductEngine(BaseEngine):
         self.target_screws = int(sop_config.get("target_screws", 8))
         self.missing_dwell_sec = float(sop_config.get("missing_dwell_sec", 15.0))
         self.max_cycle_time = float(sop_config.get("config", {}).get("max_cycle_time_sec") or sop_config.get("max_cycle_time_sec", 50.0))
+
+        # Cấu hình chống ốc rời / ốc lăn & Visible-Empty Reset (Hướng 1)
+        self.slot_confirm_sec = float(sop_config.get("slot_confirm_sec", 0.42))
+        self.slot_confirm_frames = int(sop_config.get("slot_confirm_frames", 3))
+        self.slot_grace_sec = float(sop_config.get("slot_grace_sec", 0.35))
+        self.slot_clear_sec = float(sop_config.get("slot_clear_sec", 0.85))
+        self.slot_clear_moving_sec = float(sop_config.get("slot_clear_moving_sec", 1.25))
+        self.slot_clear_frames = int(sop_config.get("slot_clear_frames", 4))
+        self.max_rel_drift = float(sop_config.get("max_rel_drift", 0.12))
         
         # State machine
         self.state = "IDLE"  # "IDLE", "ASSEMBLING", "COMPLETED", "VIOLATION"
@@ -47,10 +57,7 @@ class ProductEngine(BaseEngine):
         self.total_ng = 0
         
         # Dữ liệu chu kỳ hiện tại
-        self.slots = [False] * self.target_screws
-        self.slot_hits = [0] * self.target_screws  # Bộ đếm xác nhận: chỉ chốt slot khi xuất hiện ổn định (>= 3 frames)
-        self.has_completed_screws = False
-        self.max_simultaneous = 0
+        self._reset_slot_tracking()
         self.cycle_start_time = 0.0
         self.last_cycle_duration = 0.0
         self.last_seen_part_time = 0.0
@@ -93,6 +100,302 @@ class ProductEngine(BaseEngine):
         
         logger.info(f"ProductEngine [laprap]: Initialized (Target: {self.target_screws} screws, Max cycle: {self.max_cycle_time}s)")
 
+    def _reset_slot_tracking(self) -> None:
+        """Khởi tạo hoặc xóa toàn bộ trạng thái bám vết 8 vị trí ốc cho chu kỳ mới."""
+        self.slots = [False] * self.target_screws
+        self.slot_hits = [0] * self.target_screws
+        self.slot_seen_since = [0.0] * self.target_screws
+        self.slot_last_seen = [0.0] * self.target_screws
+        self.slot_last_rel: List[Optional[Tuple[float, float]]] = [None] * self.target_screws
+        self.slot_missing_since = [0.0] * self.target_screws
+        self.slot_missing_frames = [0] * self.target_screws
+        self.has_completed_screws = False
+        self.max_simultaneous = 0
+        self.loose_pile_detected = False
+
+    def _get_slot_pixel_center(self, slot_idx: int, part_box: List[float]) -> Tuple[float, float]:
+        """Ước lượng tọa độ tâm (sx, sy) của vị trí lỗ ốc slot_idx trên bounding box sản phẩm."""
+        px1, py1, px2, py2 = part_box
+        pw = max(1.0, float(px2 - px1))
+        ph = max(1.0, float(py2 - py1))
+        tier_centers_long = (0.16, 0.38, 0.58, 0.84)
+        tier = min(3, max(0, slot_idx // 2))
+        c_long = tier_centers_long[tier]
+        c_lat = 0.72 if (slot_idx % 2 == 1) else 0.30
+        if ph >= pw:
+            return (px1 + c_lat * pw, py1 + c_long * ph)
+        return (px1 + c_long * pw, py1 + c_lat * ph)
+
+    def _is_slot_occluded_by_hand(self, slot_idx: int, part_box: List[float],
+                                  hands_data: List[Dict]) -> bool:
+        """Kiểm tra vùng của slot_idx có đang bị bàn tay công nhân che khuất hay không."""
+        if not hands_data:
+            return False
+        px1, py1, px2, py2 = part_box
+        pw = max(1.0, float(px2 - px1))
+        ph = max(1.0, float(py2 - py1))
+        sx, sy = self._get_slot_pixel_center(slot_idx, part_box)
+        radius = max(24.0, 0.16 * min(pw, ph))
+        rx1, ry1, rx2, ry2 = sx - radius, sy - radius, sx + radius, sy + radius
+
+        for h in hands_data:
+            hb = h.get("bbox")
+            if not hb:
+                continue
+            if max(rx1, hb[0]) < min(rx2, hb[2]) and max(ry1, hb[1]) < min(ry2, hb[3]):
+                return True
+        return False
+
+    def _assign_screws_to_slots(self, part_box: List[float], screws: List[tuple]) -> Tuple[
+        List[tuple], Dict[int, Tuple[float, float]], bool, set, int, Tuple[int, int, int, float]
+    ]:
+        """
+        Gom cụm và ánh xạ các ốc phát hiện trên sản phẩm vào 8 vị trí slot theo cấu trúc 3 cụm thực tế:
+          - Cụm Đầu (Tầng 0 - 2 lỗ): rel_long <= 0.28
+          - Cụm Giữa (Tầng 1 & 2 - 4 lỗ): 0.28 < rel_long <= 0.65
+          - Cụm Đuôi (Tầng 3 - 2 lỗ): rel_long > 0.65
+        Đồng thời lọc ốc trùng bbox, cụm ốc rời dồn đống (loose pile) và vùng tràn ốc.
+        """
+        px1, py1, px2, py2 = part_box
+        pw = max(1.0, float(px2 - px1))
+        ph = max(1.0, float(py2 - py1))
+
+        # 1. Lọc ốc nằm trong phạm vi sản phẩm (margin 10px) và khử duplicate detection gần nhau (< 12px)
+        raw_on_part = []
+        for s_box, s_conf in screws:
+            scx = (s_box[0] + s_box[2]) / 2.0
+            scy = (s_box[1] + s_box[3]) / 2.0
+            if (px1 - 10) <= scx <= (px2 + 10) and (py1 - 10) <= scy <= (py2 + 10):
+                raw_on_part.append((s_box, s_conf, scx, scy))
+
+        raw_on_part.sort(key=lambda item: item[1], reverse=True)
+        dedup_on_part = []
+        for item in raw_on_part:
+            _, _, cx, cy = item
+            if any(math.hypot(cx - k[2], cy - k[3]) < 12.0 for k in dedup_on_part):
+                continue
+            dedup_on_part.append(item)
+
+        top_screws: List[tuple] = []
+        mid_screws: List[tuple] = []
+        bot_screws: List[tuple] = []
+        all_rel_long: List[float] = []
+        all_rel_lat: List[float] = []
+
+        for s_box, s_conf, scx, scy in dedup_on_part:
+            if ph >= pw:
+                rel_long = (scy - py1) / ph
+                rel_lat = (scx - px1) / pw
+            else:
+                rel_long = (scx - px1) / pw
+                rel_lat = (scy - py1) / ph
+
+            rel_long = min(0.999, max(0.0, rel_long))
+            rel_lat = min(0.999, max(0.0, rel_lat))
+            all_rel_long.append(rel_long)
+            all_rel_lat.append(rel_lat)
+
+            item = (s_box, s_conf, rel_lat, rel_long)
+            if rel_long <= 0.28:
+                top_screws.append(item)
+            elif rel_long <= 0.65:
+                mid_screws.append(item)
+            else:
+                bot_screws.append(item)
+
+        visible_screws = len(dedup_on_part)
+        span_long = (max(all_rel_long) - min(all_rel_long)) if all_rel_long else 0.0
+        span_lat = (max(all_rel_lat) - min(all_rel_lat)) if all_rel_lat else 0.0
+
+        # Kiểm tra cụm ốc rời dồn đống (Loose Pile) toàn thân trước khi lọc nhiễu vùng
+        has_loose_pile = False
+        if visible_screws >= 5 and span_long < 0.35:
+            has_loose_pile = True
+        elif visible_screws >= 4 and span_long < 0.12 and span_lat < 0.15:
+            has_loose_pile = True
+
+        blocked_tiers = set()
+        if not has_loose_pile:
+            if len(top_screws) >= 4:
+                blocked_tiers.add(0)
+                has_loose_pile = True
+            elif len(top_screws) == 3:
+                # Nếu có 1 nhiễu ngón tay trắng ở sát mép trên (< 0.09) hoặc conf < 0.55 khi thân trải dài -> giữ 2 con chuẩn
+                valid_top = [x for x in top_screws if x[3] >= 0.09 and x[1] >= 0.52]
+                if len(valid_top) == 2 and span_long >= 0.40:
+                    top_screws = valid_top
+                else:
+                    blocked_tiers.add(0)
+
+            if len(bot_screws) >= 4:
+                blocked_tiers.add(3)
+                has_loose_pile = True
+            elif len(bot_screws) == 3:
+                valid_bot = [x for x in bot_screws if x[3] <= 0.91 and x[1] >= 0.52]
+                if len(valid_bot) == 2 and span_long >= 0.40:
+                    bot_screws = valid_bot
+                else:
+                    blocked_tiers.add(3)
+
+            if len(mid_screws) >= 6:
+                blocked_tiers.update({1, 2})
+                has_loose_pile = True
+            elif len(mid_screws) == 5:
+                # Lọc 1 nhiễu conf thấp (< 0.48) hoặc lệch rìa ngoài cụm giữa khi toàn thân trải dài
+                valid_mid = sorted(
+                    [x for x in mid_screws if x[1] >= 0.48 and 0.34 <= x[3] <= 0.55],
+                    key=lambda x: x[1],
+                    reverse=True,
+                )
+                if len(valid_mid) >= 4 and span_long >= 0.40:
+                    mid_screws = valid_mid[:4]
+                else:
+                    blocked_tiers.update({1, 2})
+
+        # Phân cụm giữa (4 lỗ) vào Tầng 1 và Tầng 2 một cách linh hoạt theo cấu trúc 2x2
+        tier_screws: Dict[int, List[tuple]] = {0: top_screws, 1: [], 2: [], 3: bot_screws}
+        mid_sorted = sorted(mid_screws, key=lambda x: x[3])
+        if len(mid_sorted) == 4:
+            tier_screws[1] = mid_sorted[:2]
+            tier_screws[2] = mid_sorted[2:]
+        elif len(mid_sorted) == 3:
+            t1 = [x for x in mid_sorted if x[3] <= 0.46]
+            t2 = [x for x in mid_sorted if x[3] > 0.46]
+            if len(t1) > 2:
+                t2.insert(0, t1.pop())
+            elif len(t2) > 2:
+                t1.append(t2.pop(0))
+            tier_screws[1] = t1
+            tier_screws[2] = t2
+        elif len(mid_sorted) >= 5:
+            tier_screws[1] = mid_sorted[:2]
+            tier_screws[2] = mid_sorted[2:]
+        else:
+            for item in mid_sorted:
+                if item[3] <= 0.46:
+                    tier_screws[1].append(item)
+                else:
+                    tier_screws[2].append(item)
+
+        current_frame_screws_on_part: List[tuple] = []
+        observed_slot_coords: Dict[int, Tuple[float, float]] = {}
+
+        for t in range(4):
+            s_list = tier_screws[t]
+            slot_base = t * 2
+
+            if len(s_list) >= 2:
+                s_list.sort(key=lambda item: item[2])
+                first, second = s_list[0], s_list[1]
+                current_frame_screws_on_part.append((first[0], first[1], slot_base))
+                current_frame_screws_on_part.append((second[0], second[1], slot_base + 1))
+                observed_slot_coords[slot_base] = (first[3], first[2])
+                observed_slot_coords[slot_base + 1] = (second[3], second[2])
+                for extra in s_list[2:]:
+                    current_frame_screws_on_part.append((extra[0], extra[1], slot_base + 1))
+            elif len(s_list) == 1:
+                s0 = s_list[0]
+                assigned = slot_base if s0[2] < 0.65 else (slot_base + 1)
+                current_frame_screws_on_part.append((s0[0], s0[1], assigned))
+                observed_slot_coords[assigned] = (s0[3], s0[2])
+
+        cluster_info = (len(top_screws), len(mid_screws), len(bot_screws), span_long)
+        return current_frame_screws_on_part, observed_slot_coords, has_loose_pile, blocked_tiers, visible_screws, cluster_info
+
+    def _update_slot_states(self, now: float, part_box: List[float], hands_data: List[Dict],
+                            observed_slot_coords: Dict[int, Tuple[float, float]],
+                            has_loose_pile: bool, blocked_tiers: set,
+                            visible_screws: int, is_moving: bool, w_frame: int,
+                            cluster_info: Tuple[int, int, int, float]) -> None:
+        """
+        Cập nhật 8 slot theo 3 lớp bảo vệ (Hướng 1):
+          1. Chặn cụm ốc rời (has_loose_pile / blocked_tiers).
+          2. Neo giữ thời gian + chống trôi/lăn (dwell >= slot_confirm_sec & drift <= max_rel_drift).
+          3. Visible-Empty Reset: Khi cụm đó hoặc toàn bộ lòng máng đang mở rõ và không bị tay che
+             mà slot trống liên tiếp >= clear_sec -> Xóa slot.
+        """
+        pw = max(1.0, float(part_box[2] - part_box[0]))
+        ph = max(1.0, float(part_box[3] - part_box[1]))
+        can_see_interior = (visible_screws >= 1) and (min(pw, ph) >= max(55.0, 0.045 * float(w_frame)))
+        n_top, n_mid, n_bot, span_long = cluster_info
+        is_full_view = (visible_screws >= 3 and span_long >= 0.48)
+
+        for idx in range(self.target_screws):
+            tier = idx // 2
+            if idx in observed_slot_coords:
+                rel_long, rel_lat = observed_slot_coords[idx]
+                self.slot_missing_since[idx] = 0.0
+                self.slot_missing_frames[idx] = 0
+
+                if not self.slots[idx]:
+                    # Chặn xác nhận mới nếu đang phát hiện cụm ốc rời hoặc vùng bị tràn ốc
+                    if has_loose_pile or (tier in blocked_tiers):
+                        self.slot_hits[idx] = 0
+                        self.slot_seen_since[idx] = 0.0
+                        self.slot_last_rel[idx] = None
+                        continue
+
+                    prev_rel = self.slot_last_rel[idx]
+                    if prev_rel is not None:
+                        # Ốc rời chỉ có thể lăn dọc theo lòng máng -> kiểm tra độ trượt dọc rel_long
+                        # (không dùng rel_lat vì khi nghiêng chéo phôi, bounding box X/Y làm rel_lat dao động lớn)
+                        long_drift = abs(rel_long - prev_rel[0])
+                        if long_drift > self.max_rel_drift:
+                            # Ốc đang trượt/lăn dọc qua ô -> reset bộ đếm thời gian đứng yên
+                            self.slot_seen_since[idx] = now
+                            self.slot_hits[idx] = 1
+                        else:
+                            if self.slot_seen_since[idx] == 0.0:
+                                self.slot_seen_since[idx] = now
+                            self.slot_hits[idx] += 1
+                    else:
+                        self.slot_seen_since[idx] = now
+                        self.slot_hits[idx] = 1
+
+                    self.slot_last_seen[idx] = now
+                    self.slot_last_rel[idx] = (rel_long, rel_lat)
+
+                    if ((now - self.slot_seen_since[idx]) >= self.slot_confirm_sec
+                            and self.slot_hits[idx] >= self.slot_confirm_frames):
+                        self.slots[idx] = True
+                else:
+                    self.slot_last_seen[idx] = now
+                    self.slot_last_rel[idx] = (rel_long, rel_lat)
+            else:
+                if not self.slots[idx]:
+                    if self.slot_last_seen[idx] > 0.0 and (now - self.slot_last_seen[idx]) > self.slot_grace_sec:
+                        self.slot_seen_since[idx] = 0.0
+                        self.slot_hits[idx] = 0
+                        self.slot_last_rel[idx] = None
+                else:
+                    # Chỉ xóa slot nếu chính cụm đó đang lộ rõ hoặc đang mở toàn bộ lòng máng (chống xóa oan khi nghiêng lắp đầu kia)
+                    if idx in (0, 1):
+                        view_ok = (n_top >= 1) or is_full_view
+                    elif idx in (2, 3, 4, 5):
+                        view_ok = (n_mid >= 1) or (n_top >= 1 and n_bot >= 1) or is_full_view
+                    else:
+                        view_ok = (n_bot >= 1) or is_full_view
+
+                    occluded = self._is_slot_occluded_by_hand(idx, part_box, hands_data)
+                    if can_see_interior and view_ok and not occluded:
+                        if self.slot_missing_since[idx] == 0.0:
+                            self.slot_missing_since[idx] = now
+                        self.slot_missing_frames[idx] += 1
+                        clear_sec = self.slot_clear_moving_sec if is_moving else self.slot_clear_sec
+                        if ((now - self.slot_missing_since[idx]) >= clear_sec
+                                and self.slot_missing_frames[idx] >= self.slot_clear_frames):
+                            self.slots[idx] = False
+                            self.slot_hits[idx] = 0
+                            self.slot_seen_since[idx] = 0.0
+                            self.slot_last_rel[idx] = None
+                            self.slot_missing_since[idx] = 0.0
+                            self.slot_missing_frames[idx] = 0
+                            self.has_completed_screws = False
+                            logger.info(f"ProductEngine [laprap]: Visible-Empty Reset cleared slot #{idx + 1}.")
+                    else:
+                        self.slot_missing_since[idx] = 0.0
+                        self.slot_missing_frames[idx] = 0
+
     def _is_point_in_zone(self, point: tuple, zone_name: str) -> bool:
         """Kiểm tra tọa độ normalized (x, y) có nằm trong polygon của zone không."""
         pts = self.zones.get(zone_name)
@@ -122,8 +425,8 @@ class ProductEngine(BaseEngine):
         return False
 
     def update(self, hands_data: List[Dict], products_data: List[Dict] = None,
-               robot_data: List[Dict] = None) -> Dict[str, Any]:
-        now = time.time()
+               robot_data: List[Dict] = None, timestamp: Optional[float] = None) -> Dict[str, Any]:
+        now = timestamp if timestamp is not None else time.time()
         self.last_update_time = now
         products_data = products_data or []
         hands_data = hands_data or []
@@ -217,40 +520,18 @@ class ProductEngine(BaseEngine):
                 self.part_absent_start = 0.0
             self.part_present_streak += 1
             self.last_seen_part_time = now
-            
-            px1, py1, px2, py2 = part_hand_box
-            pw = max(1, px2 - px1)
-            ph = max(1, py2 - py1)
-            
-            # Lọc ốc nằm trong phạm vi chi tiết
-            tier_screws = {0: [], 1: [], 2: [], 3: []}
-            for s_box, s_conf in screws:
-                scx = (s_box[0] + s_box[2]) / 2
-                scy = (s_box[1] + s_box[3]) / 2
-                if (px1 - 20) <= scx <= (px2 + 20) and (py1 - 20) <= scy <= (py2 + 20):
-                    if ph >= pw:
-                        rel_long = (scy - py1) / ph
-                        rel_lat = (scx - px1) / pw
-                    else:
-                        rel_long = (scx - px1) / pw
-                        rel_lat = (scy - py1) / ph
-                    
-                    rel_long = min(0.999, max(0.0, rel_long))
-                    
-                    # 4 tầng hình học dọc của chi tiết
-                    if rel_long <= 0.27:
-                        t = 0
-                    elif rel_long <= 0.48:
-                        t = 1
-                    elif rel_long <= 0.70:
-                        t = 2
-                    else:
-                        t = 3
-                        
-                    tier_screws[t].append((s_box, s_conf, rel_lat, scx))
 
-            visible_screws = sum(len(tier_screws[t]) for t in range(4))
-            has_all_screws = (self.has_completed_screws or visible_screws >= self.target_screws or sum(self.slots) >= self.target_screws)
+            (
+                current_frame_screws_on_part,
+                observed_slot_coords,
+                has_loose_pile,
+                blocked_tiers,
+                visible_screws,
+                cluster_info,
+            ) = self._assign_screws_to_slots(part_hand_box, screws)
+
+            self.loose_pile_detected = has_loose_pile
+            has_all_screws = (self.has_completed_screws or sum(self.slots) >= self.target_screws)
 
             # Đánh dấu chi tiết vào VÙNG CẤT (vung_cat) bên trái
             # CHỈ kích hoạt khi chính bounding box của chi tiết (part_hand) nằm trong khay cất
@@ -258,7 +539,7 @@ class ProductEngine(BaseEngine):
                 if part_in_cat:
                     if has_all_screws:
                         self.entered_cat_zone = True
-                    elif max(sum(self.slots), self.max_simultaneous) > 0:
+                    elif sum(self.slots) > 0 or self.loose_pile_detected or visible_screws > 0:
                         self.entered_cat_incomplete = True
                 else:
                     # Chi tiết đang ở giữa bàn làm việc hoặc vùng lấy -> Đang lắp ráp bình thường!
@@ -301,7 +582,7 @@ class ProductEngine(BaseEngine):
                     if self.cat_release_start == 0.0:
                         self.cat_release_start = now
                     if now - self.cat_release_start >= 0.35:
-                        curr_count = max(sum(self.slots), self.max_simultaneous)
+                        curr_count = sum(self.slots)
                         self.total_ng += 1
                         self.last_cycle_duration = round(now - self.cycle_start_time, 1)
                         self.state = "VIOLATION"
@@ -336,10 +617,7 @@ class ProductEngine(BaseEngine):
                         self.cycle_count += 1
                         self.cycle_start_time = now
                         self.last_cycle_duration = 0.0
-                        self.slots = [False] * self.target_screws
-                        self.slot_hits = [0] * self.target_screws
-                        self.has_completed_screws = False
-                        self.max_simultaneous = 0
+                        self._reset_slot_tracking()
                         self.is_failed = False
                         self.violation_type = None
                         self.banner_until = 0.0
@@ -356,64 +634,52 @@ class ProductEngine(BaseEngine):
                         else:
                             self.status_msg = "Sẵn sàng (Chờ lấy phôi từ khay phải)"
 
-            # Gán slot cho từng con ốc theo 2D Tier Accumulator (Trái / Phải) với bộ lọc xác nhận chống nhiễu
-            for t in range(4):
-                s_list = tier_screws[t]
-                slot_base = t * 2
-                
-                if len(s_list) >= 2:
-                    s_list.sort(key=lambda item: item[2])
-                    current_frame_screws_on_part.append((s_list[0][0], s_list[0][1], slot_base))
-                    current_frame_screws_on_part.append((s_list[1][0], s_list[1][1], slot_base + 1))
-                    for extra in s_list[2:]:
-                        current_frame_screws_on_part.append((extra[0], extra[1], slot_base + 1))
-                        
-                    if self.state == "ASSEMBLING":
-                        self.slot_hits[slot_base] += 1
-                        self.slot_hits[slot_base + 1] += 1
-                        if self.slot_hits[slot_base] >= 3:
-                            self.slots[slot_base] = True
-                        if self.slot_hits[slot_base + 1] >= 3:
-                            self.slots[slot_base + 1] = True
-                elif len(s_list) == 1:
-                    rel_lat = s_list[0][2]
-                    assigned_slot = slot_base if rel_lat < 0.65 else (slot_base + 1)
-                    current_frame_screws_on_part.append((s_list[0][0], s_list[0][1], assigned_slot))
-                    
-                    if self.state == "ASSEMBLING":
-                        self.slot_hits[assigned_slot] += 1
-                        if self.slot_hits[assigned_slot] >= 3:
-                            self.slots[assigned_slot] = True
+            # Cập nhật trạng thái 8 slots theo Hướng 1 (Dwell >= 0.65s, chống ốc lăn/cụm ốc rời, Visible-Empty Reset)
+            if self.state == "ASSEMBLING":
+                self._update_slot_states(
+                    now=now,
+                    part_box=part_hand_box,
+                    hands_data=hands_data,
+                    observed_slot_coords=observed_slot_coords,
+                    has_loose_pile=has_loose_pile,
+                    blocked_tiers=blocked_tiers,
+                    visible_screws=visible_screws,
+                    is_moving=is_moving,
+                    w_frame=w_frame,
+                    cluster_info=cluster_info,
+                )
 
             self.last_screws_on_part = current_frame_screws_on_part
             
-            # Cập nhật số ốc đồng thời trong frame
+            # Chỉ lưu thống kê tham khảo, KHÔNG dùng để đếm tiến độ hoặc chốt PASS
             n_sim = len(current_frame_screws_on_part)
-            if n_sim > self.max_simultaneous:
+            if not has_loose_pile and n_sim > self.max_simultaneous:
                 self.max_simultaneous = n_sim
                 
             if self.state == "ASSEMBLING":
-                curr_count = max(sum(self.slots), self.max_simultaneous)
+                curr_count = sum(self.slots)
+                self.has_completed_screws = (curr_count >= self.target_screws)
                 
                 if curr_count < 2:
                     self.current_step_idx = 1   # Bước 2: Lắp ốc vị trí 1 - 2
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc ({curr_count}/{self.target_screws})"
                 elif curr_count < 4:
                     self.current_step_idx = 2   # Bước 3: Lắp ốc vị trí 3 - 4
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc ({curr_count}/{self.target_screws})"
                 elif curr_count < 6:
                     self.current_step_idx = 3   # Bước 4: Lắp ốc vị trí 5 - 6
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc ({curr_count}/{self.target_screws})"
                 elif curr_count < 8:
                     self.current_step_idx = 4   # Bước 5: Lắp ốc vị trí 7 - 8
-                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc ({curr_count}/{self.target_screws})"
                 else:
                     self.current_step_idx = 5   # Bước 6: Hoàn tất & Cất chi tiết
-                    self.has_completed_screws = True
+
+                if curr_count >= self.target_screws:
                     if self.entered_cat_zone:
                         self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang cất khay trái - Chờ buông 2 tay..."
                     else:
                         self.status_msg = f"Chu kỳ #{self.cycle_count}: Đủ 8 ốc - Đóng nẹp & Đưa sang khay trái"
+                elif has_loose_pile:
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Cảnh báo cụm ốc rời! ({curr_count}/{self.target_screws})"
+                else:
+                    self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang lắp ốc ({curr_count}/{self.target_screws})"
                 
         else:
             # --- TRƯỜNG HỢP VẮNG BÓNG CHI TIẾT TRÊN TAY (ABSENT) ---
@@ -421,6 +687,7 @@ class ProductEngine(BaseEngine):
                 self.part_absent_start = now
             self.part_present_streak = 0
             self.last_screws_on_part = []
+            self.loose_pile_detected = False
             
             # TRƯỜNG HỢP A: ĐÃ VÀO VÙNG CẤT THÀNH PHẨM (vung_cat) VÀ BUÔNG TAY THẢ VÀO KHAY -> PASS!
             if self.state == "ASSEMBLING" and self.entered_cat_zone:
@@ -447,7 +714,7 @@ class ProductEngine(BaseEngine):
                 if self.cat_release_start == 0.0:
                     self.cat_release_start = now
                 if now - self.cat_release_start >= 0.35:
-                    curr_count = max(sum(self.slots), self.max_simultaneous)
+                    curr_count = sum(self.slots)
                     self.total_ng += 1
                     self.last_cycle_duration = round(now - self.cycle_start_time, 1)
                     self.state = "VIOLATION"
@@ -468,7 +735,7 @@ class ProductEngine(BaseEngine):
                 self.status_msg = f"Chu kỳ #{self.cycle_count}: Đủ 8 ốc - Đóng nẹp & Đưa sang khay trái"
             
             # TRƯỜNG HỢP C: 0 ỐC: Vắng bóng 1.5s -> Reset IDLE (không tính lỗi NG)
-            elif self.state == "ASSEMBLING" and max(sum(self.slots), self.max_simultaneous) == 0:
+            elif self.state == "ASSEMBLING" and sum(self.slots) == 0:
                 if now - self.last_seen_part_time >= 1.5:
                     self.state = "IDLE"
                     self.sop_status = "idle"
@@ -478,9 +745,7 @@ class ProductEngine(BaseEngine):
                     self.status_msg = "Sẵn sàng (Chờ phôi mới từ khay phải)"
                     self.banner_until = 0.0
                     self.last_result_banner = None
-                    self.slots = [False] * self.target_screws
-                    self.slot_hits = [0] * self.target_screws
-                    self.max_simultaneous = 0
+                    self._reset_slot_tracking()
                     self.entered_cat_zone = False
                     self.entered_cat_incomplete = False
                     self.cat_release_start = 0.0
@@ -488,13 +753,13 @@ class ProductEngine(BaseEngine):
                     
             # TRƯỜNG HỢP D: 1-7 ỐC ĐANG LẮP MÀ TẠM DỪNG (NGOẢNH NÓI CHUYỆN, ĐẶT XUỐNG BÀN, LẤY ỐC):
             # TUYỆT ĐỐI KHÔNG BÁO LỖI (KHÔNG TÍNH NG), GIỮ NGUYÊN CHU KỲ VÀ SLOTS ĐỂ CÔNG NHÂN QUAY LẠI LẮP TIẾP!
-            elif self.state == "ASSEMBLING" and (1 <= max(sum(self.slots), self.max_simultaneous) < self.target_screws):
-                curr_count = max(sum(self.slots), self.max_simultaneous)
+            elif self.state == "ASSEMBLING" and (1 <= sum(self.slots) < self.target_screws):
+                curr_count = sum(self.slots)
                 self.status_msg = f"Chu kỳ #{self.cycle_count}: Đang tạm dừng ({curr_count}/{self.target_screws} ốc)"
                     
         # Kiểm tra quá thời gian tối đa chu kỳ (Timeout)
         if self.state == "ASSEMBLING" and (now - self.cycle_start_time > self.max_cycle_time):
-            final_screw_count = max(sum(self.slots), self.max_simultaneous)
+            final_screw_count = sum(self.slots)
             self.last_cycle_duration = round(now - self.cycle_start_time, 1)
             
             if final_screw_count == 0:
@@ -506,9 +771,7 @@ class ProductEngine(BaseEngine):
                 self.status_msg = "Sẵn sàng (Chờ phôi mới từ khay phải)"
                 self.banner_until = 0.0
                 self.last_result_banner = None
-                self.slots = [False] * self.target_screws
-                self.slot_hits = [0] * self.target_screws
-                self.max_simultaneous = 0
+                self._reset_slot_tracking()
                 self.entered_cat_zone = False
                 self.entered_cat_incomplete = False
                 self.cat_release_start = 0.0
@@ -551,7 +814,7 @@ class ProductEngine(BaseEngine):
 
     def get_status(self) -> Dict[str, Any]:
         now = self.last_update_time
-        screw_count = max(sum(self.slots), self.max_simultaneous)
+        screw_count = sum(self.slots)
         
         # Danh sách 6 bước chuẩn SOP đồng bộ với laprap.yaml
         step_names = [
@@ -570,9 +833,7 @@ class ProductEngine(BaseEngine):
             self.status_msg = "Sẵn sàng (Chờ lấy phôi từ khay phải)"
             self.current_step_idx = 0
             self.last_result_banner = None
-            self.slots = [False] * self.target_screws
-            self.slot_hits = [0] * self.target_screws
-            self.max_simultaneous = 0
+            self._reset_slot_tracking()
             self.entered_cat_zone = False
             self.entered_cat_incomplete = False
             self.cat_release_start = 0.0
@@ -650,9 +911,7 @@ class ProductEngine(BaseEngine):
     def reset(self) -> None:
         self.state = "IDLE"
         self.sop_status = "idle"
-        self.slots = [False] * self.target_screws
-        self.slot_hits = [0] * self.target_screws
-        self.max_simultaneous = 0
+        self._reset_slot_tracking()
         self.part_present_streak = 0
         self.cycle_start_time = 0.0
         self.last_cycle_duration = 0.0
@@ -756,9 +1015,12 @@ class ProductEngine(BaseEngine):
             elif self.has_completed_screws:
                 state_color = (16, 220, 160)
                 state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: DU 8 OC - DUA SANG KHAY TRAI"
-            elif now - self.last_seen_part_time >= 2.0 and max(sum(self.slots), self.max_simultaneous) > 0:
+            elif self.loose_pile_detected:
+                state_color = (0, 165, 255)
+                state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: CANH BAO CUM OC ROI!"
+            elif now - self.last_seen_part_time >= 2.0 and sum(self.slots) > 0:
                 state_color = (255, 180, 50)
-                curr_count = max(sum(self.slots), self.max_simultaneous)
+                curr_count = sum(self.slots)
                 state_str = f"MAY IN-HOT-LAPRAP | CHU KY #{self.cycle_count}: DANG TAM DUNG ({curr_count}/{self.target_screws} OC)"
             else:
                 state_color = (0, 220, 255)
@@ -778,7 +1040,7 @@ class ProductEngine(BaseEngine):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.48, (16, 200, 100), 1, cv2.LINE_AA)
                     
         # Dòng 2: Dải 8 ô ốc trực quan [1] [2] ... [8]
-        screw_count = max(sum(self.slots), self.max_simultaneous)
+        screw_count = sum(self.slots)
         if self.state == "IDLE":
             screw_count = 0
         bar_x = 32
