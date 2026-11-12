@@ -962,24 +962,17 @@ class ProductEngine(BaseEngine):
         if motion_score > 1000 or hand_in_btn:
             self.log_debug(f"[TURNTABLE PROBE] state={self.turntable_state}, score={motion_score}, moving={self.is_turntable_moving}, btn={hand_in_btn}, spin_frames={self.turntable_spin_frames}, peak={getattr(self, 'turntable_peak_motion', 0)}", self.product_id)
 
-        # 2. Máy trạng thái hữu hạn (FSM) - NHẬN DIỆN MÂM XOAY HOÀN THÀNH (ĐỘC LẬP / BẤM NÚT)
-        # CHỐNG NHẦM 100% VỚI THAO TÁC ĐẶT PHÔI:
-        # - Đặt phôi: Cường độ motion score chỉ từ 1500-3500, thời gian ngắt quãng, peak < 4500.
-        # - Mâm xoay thật 180°: Cường độ motion score cực lớn (Peak >= 4500), kéo dài liên tục 1.0s - 3.5s (>= 18 frames).
+        # 2. Máy trạng thái hữu hạn (FSM) - BẮT BUỘC ẤN NÚT (TRIGGER) -> MÂM QUAY XONG MỚI TÍNH +2 SP
+        # Loại bỏ 100% việc tự đếm khi đặt phôi hoặc robot thò tay:
+        # Bắt buộc phải có ấn nút button_right trước, sau đó mâm xoay xong mới tính.
         if (curr_time - self.turntable_last_count_time) > self.turntable_debounce_sec:
             # Thoát COOLDOWN_LOCK chuyển về IDLE để sẵn sàng đón lượt xoay tiếp theo
             if self.turntable_state == 'COOLDOWN_LOCK':
                 self.turntable_state = 'IDLE'
 
             if self.turntable_state == 'IDLE':
-                if self.is_turntable_moving:
-                    # Mâm bắt đầu chuyển động xoay
-                    self.turntable_state = 'SPINNING'
-                    self.turntable_spin_start_time = curr_time
-                    self.turntable_spin_frames = 1
-                    self.turntable_spin_gap_frames = 0
-                    self.turntable_peak_motion = motion_score
-                elif hand_in_btn:
+                # Chỉ kích hoạt chờ mâm quay khi có ấn nút xanh (button_right)
+                if hand_in_btn:
                     self.turntable_state = 'TRIGGERED_WAIT_SPIN'
                     self.turntable_trigger_time = curr_time
                     self.turntable_spin_frames = 0
@@ -994,6 +987,7 @@ class ProductEngine(BaseEngine):
                     self.turntable_spin_gap_frames = 0
                     self.turntable_peak_motion = motion_score
                 elif (curr_time - self.turntable_trigger_time) > 4.0:
+                    # Quá 4.0s sau khi ấn nút mà không thấy mâm quay thì tự hủy về IDLE
                     self.turntable_state = 'IDLE'
                     self.turntable_spin_frames = 0
 
@@ -1012,17 +1006,17 @@ class ProductEngine(BaseEngine):
                             self.product_id
                         )
                 else:
-                    # Chịu được gián đoạn tối đa 4 frames (~0.2s) trong quá trình mâm xoay
+                    # Chịu được gián đoạn tối đa 6 frames trong quá trình mâm xoay
                     self.turntable_spin_gap_frames = getattr(self, 'turntable_spin_gap_frames', 0) + 1
-                    if self.turntable_spin_gap_frames > 4:
+                    if self.turntable_spin_gap_frames > 6:
                         actual_spin_dur = spin_elapsed - 0.2
-                        min_peak_thresh = int(4500 * scale_factor)
+                        min_peak_thresh = int(4000 * scale_factor)
 
                         # ĐIỀU KIỆN XÁC NHẬN MÂM XOAY HOÀN THÀNH:
-                        # 1. Thời lượng xoay từ 0.9s đến 3.5s
-                        # 2. Số khung hình chuyển động >= 18 frames
-                        # 3. Đỉnh chuyển động (Peak Motion) >= 4500 (loại trừ 100% thao tác đặt phôi/thò tay)
-                        if self.turntable_spin_frames >= 18 and (0.9 <= actual_spin_dur <= 3.5) and (self.turntable_peak_motion >= min_peak_thresh):
+                        # 1. Thời lượng xoay từ 0.7s đến 4.5s
+                        # 2. Số khung hình chuyển động >= 6 frames (phù hợp với tốc độ live stream ~8-15 FPS)
+                        # 3. Đỉnh chuyển động (Peak Motion) >= 4000 (loại trừ thao tác đặt phôi/thò tay chỉ < 3000)
+                        if self.turntable_spin_frames >= 6 and (0.7 <= actual_spin_dur <= 4.5) and (self.turntable_peak_motion >= min_peak_thresh):
                             self.total_products += 2
                             self.turntable_last_count_time = curr_time
                             self.turntable_state = 'COOLDOWN_LOCK'
@@ -1034,7 +1028,7 @@ class ProductEngine(BaseEngine):
                                 "total_products": self.total_products
                             }
                             self.log_debug(
-                                f"[TURNTABLE COUNT] Xac thuc mam xoay hoan thanh ({actual_spin_dur:.1f}s, peak={self.turntable_peak_motion}): +2 SP | Tong: {self.total_products} SP",
+                                f"[TURNTABLE COUNT] Xac thuc mam xoay hoan thanh ({actual_spin_dur:.1f}s, frames={self.turntable_spin_frames}, peak={self.turntable_peak_motion}): +2 SP | Tong: {self.total_products} SP",
                                 self.product_id
                             )
                         else:
