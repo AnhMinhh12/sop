@@ -1059,7 +1059,10 @@ function renderStationDetail(cam) {
             <div class="info-panel">
                 <div class="station-header">
                     <div class="station-name">${cam.name}</div>
-                    <div id="status-${cam.id}" class="status-indicator">${cam.monitoring_enabled === false ? 'ĐÃ TẮT GIÁM SÁT' : 'READY'}</div>
+                    <div class="flex items-center gap-2">
+                        <span id="station-product-count-${cam.id}" class="badge-tag bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-sm">0 SP</span>
+                        <div id="status-${cam.id}" class="status-indicator">${cam.monitoring_enabled === false ? 'ĐÃ TẮT GIÁM SÁT' : 'READY'}</div>
+                    </div>
                 </div>
 
                 <div class="product-selector-box mb-4">
@@ -1354,10 +1357,10 @@ socket.on('step_update', (data) => {
     } = data;
     
     // --- CẬP NHẬT TRANG THỐNG KÊ & SỰ KIỆN GẦN NHẤT REALTIME ---
-    const statsEventKey = `${cycle_count}:${data.sop_status}`;
+    const statsEventKey = `${cycle_count}:${data.sop_status}:${data.total_products}`;
     const statsEventChanged = statsLastEventByCamera.get(camera_id) !== statsEventKey;
     statsLastEventByCamera.set(camera_id, statsEventKey);
-    if ((data.sop_status === 'completed' || data.sop_status === 'violation') && statsEventChanged) {
+    if ((data.sop_status === 'completed' || data.sop_status === 'violation' || data.new_product_event || (data.total_products !== undefined && statsEventChanged)) && statsEventChanged) {
         const statsDateInput = document.getElementById('target-date');
         if (statsDateInput && !statsRealtimeTimer) {
             statsRealtimeTimer = setTimeout(() => {
@@ -1394,6 +1397,10 @@ socket.on('step_update', (data) => {
     if (fill) fill.style.width = `${progress_percent}%`;
     if (label) label.innerText = current_step;
     if (cycle) cycle.innerText = cycle_count;
+    const stationProdBadge = document.getElementById(`station-product-count-${camera_id}`);
+    if (stationProdBadge && data.total_products !== undefined) {
+        stationProdBadge.innerText = `Sản lượng: ${data.total_products} SP`;
+    }
     if (statusFooter) statusFooter.innerText = status_msg;
     
     // Đổi màu indicator nếu đang chạy

@@ -199,6 +199,9 @@ class FrameProcessor:
                         hands_data = []
 
                     # 3. Dynamic Engine Update (truyền thêm robot_data cho TFF4040)
+                    if hasattr(self.engine, "update_turntable_motion"):
+                        self.engine.update_turntable_motion(frame, loop_start)
+
                     self.latest_status = self.engine.update(hands_data, self._cached_products, self._cached_robots)
             
                     # 4. Check Violation

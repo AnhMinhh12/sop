@@ -24,10 +24,14 @@ class Database:
                 maxcached=5,
                 maxconnections=10,
                 blocking=True,
-                host=os.getenv("DB_HOST", "10.0.10.13"),
+                # host=os.getenv("DB_HOST", "10.0.10.13"),
+                # port=int(os.getenv("DB_PORT", 3306)),
+                # user=os.getenv("DB_USER", "minhha"),
+                # password=os.getenv("DB_PASSWORD", "Htmp1234"),
+                host=os.getenv("DB_HOST", "127.0.0.1"),
                 port=int(os.getenv("DB_PORT", 3306)),
-                user=os.getenv("DB_USER", "minhha"),
-                password=os.getenv("DB_PASSWORD", "Htmp1234"),
+                user=os.getenv("DB_USER", "ndn"),
+                password=os.getenv("DB_PASSWORD", "081220"),
                 database=os.getenv("DB_NAME", "ai_system"),
                 charset="utf8mb4",
                 autocommit=True,
@@ -36,7 +40,7 @@ class Database:
             )
             logger.info(
                 f"Database: Connected to MySQL "
-                f"{os.getenv('DB_HOST', '10.0.10.13')}:{os.getenv('DB_PORT', 3306)} "
+                f"{os.getenv('DB_HOST', '127.0.0.1')}:{os.getenv('DB_PORT', 3306)} "
                 f"successfully."
             )
             self._init_tables()

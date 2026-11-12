@@ -91,6 +91,18 @@ class ProductEngine(BaseEngine):
         self._robot_exit_start = 0.0
         self._pending_product_event = None
 
+        # --- BỘ ĐẾM SẢN LƯỢNG MÂM XOAY 180° CHỐNG QUỆT NHẦM (DOCX: MOG2 + FSM) ---
+        self.turntable_fgbg = cv2.createBackgroundSubtractorMOG2(history=20, varThreshold=50, detectShadows=False)
+        self.turntable_state = 'IDLE' # 'IDLE' -> 'TRIGGERED_WAIT_SPIN' -> 'SPINNING' -> 'COOLDOWN_LOCK' -> 'ERROR_SPIN_ANOMALY'
+        self.turntable_trigger_time = 0.0
+        self.turntable_spin_start_time = 0.0
+        self.turntable_spin_frames = 0
+        self.turntable_last_count_time = 0.0
+        self.turntable_debounce_sec = 8.0
+        self.max_allowed_spin_duration = 5.5  # Ngưỡng tối đa 1 lần xoay 180° (quá 5.5s liên tục = kẹt mâm / lỗi cơ khí)
+        self.last_turntable_motion_score = 0
+        self.is_turntable_moving = False
+
         # Tải số lần và thời gian dừng máy, số sản phẩm đã ghi nhận trong ngày từ DB
         try:
             from shared.db.queries import EventQueries
@@ -587,7 +599,9 @@ class ProductEngine(BaseEngine):
             "total_downtime_sec": round(self.total_downtime_sec, 1),
             "machine_status": "stopped" if self.is_machine_stopped else "running",
             "robot_pickups": getattr(self, "robot_pickups", 0),
-            "total_products": getattr(self, "total_products", 0)
+            "total_products": getattr(self, "total_products", 0),
+            "turntable_state": getattr(self, "turntable_state", "IDLE"),
+            "is_turntable_moving": getattr(self, "is_turntable_moving", False)
         }
 
         if getattr(self, "_pending_product_event", None):
@@ -919,3 +933,95 @@ class ProductEngine(BaseEngine):
             if h["label"] == "right": r_pos = h["centroid"]
         if l_pos and r_pos: return np.sqrt((l_pos[0]-r_pos[0])**2 + (l_pos[1]-r_pos[1])**2)
         return -1.0
+
+    # --- BỘ ĐẾM SẢN LƯỢNG MÂM XOAY 180° CHỐNG QUỆT NHẦM (DOCX: MOG2 + FSM) ---
+    def update_turntable_motion(self, frame: np.ndarray, curr_time: float) -> None:
+        """
+        Đo biến thiên chuyển động MOG2 trên vùng mâm xoay và thực hiện FSM xác thực 2 bước:
+        1. Ấn nút xanh button_right (Điều kiện cần - Trigger)
+        2. Mâm xoay quay 180° (Điều kiện đủ - Verify)
+        Chống quệt nhầm 100%: Quá 2.5s không thấy mâm xoay thì tự hủy.
+        Debounce: Khóa 8.0s sau khi +2 SP để chống dội nút.
+        """
+        if frame is None:
+            return
+
+        h, w = frame.shape[:2]
+        turntable_pts = self.zones.get("work_area") or self.zones.get("mold")
+        if not turntable_pts:
+            return
+
+        poly_pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in turntable_pts], np.int32)
+
+        # 1. Trừ nền OpenCV MOG2 trên vùng mâm xoay
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(mask, [poly_pts], 255)
+        roi = cv2.bitwise_and(frame, frame, mask=mask)
+        fgmask = self.turntable_fgbg.apply(roi)
+        motion_score = cv2.countNonZero(fgmask)
+        self.last_turntable_motion_score = motion_score
+
+        # Ngưỡng pixel chuyển động (quy đổi theo tỷ lệ khung hình)
+        scale_factor = (w * h) / (1280 * 720)
+        motion_threshold = max(800, int(3500 * scale_factor))
+        self.is_turntable_moving = motion_score > motion_threshold
+
+        # Kiểm tra tay có đang chạm nút button_right hay không
+        hand_in_btn = any(self._is_in_zone(side, "button_right") for side in ["left", "right"])
+
+        # 2. Máy trạng thái hữu hạn (FSM 2 bước)
+        if (curr_time - self.turntable_last_count_time) > self.turntable_debounce_sec:
+            if self.turntable_state == 'IDLE':
+                if hand_in_btn:
+                    self.turntable_state = 'TRIGGERED_WAIT_SPIN'
+                    self.turntable_trigger_time = curr_time
+                    self.turntable_spin_frames = 0
+            elif self.turntable_state == 'TRIGGERED_WAIT_SPIN':
+                if self.is_turntable_moving:
+                    self.turntable_spin_frames += 1
+                    if self.turntable_spin_frames >= 3:
+                        self.turntable_state = 'SPINNING'
+                        self.turntable_spin_start_time = curr_time
+                elif (curr_time - self.turntable_trigger_time) > 2.5:
+                    # Quá 2.5s không thấy mâm quay -> Quệt nhầm nút -> HỦY
+                    self.turntable_state = 'IDLE'
+                    self.turntable_spin_frames = 0
+            elif self.turntable_state == 'SPINNING':
+                spin_elapsed = curr_time - getattr(self, 'turntable_spin_start_time', curr_time)
+                if self.is_turntable_moving:
+                    self.turntable_spin_frames += 1
+                    # CHỐT AN TOÀN: Nếu mâm xoay liên tục vượt quá 5.5s (kẹt rơ-le / chạy thử máy)
+                    if spin_elapsed > self.max_allowed_spin_duration:
+                        self.turntable_state = 'ERROR_SPIN_ANOMALY'
+                        self.log_debug(
+                            f"[TURNTABLE ANOMALY] CANH BAO: Mam xoay lien tuc bat thuong ({spin_elapsed:.1f}s > {self.max_allowed_spin_duration}s)! Da khoa dem san pham.",
+                            self.product_id
+                        )
+                else:
+                    # Mâm xoay vừa quay xong (ít nhất 6 frames chuyển động)
+                    if self.turntable_spin_frames >= 6:
+                        self.total_products += 2
+                        self.turntable_last_count_time = curr_time
+                        self.turntable_state = 'IDLE'
+                        self.turntable_spin_frames = 0
+                        self._pending_product_event = {
+                            "added_products": 2,
+                            "robot_pickups": getattr(self, "robot_pickups", 0),
+                            "total_products": self.total_products
+                        }
+                        self.log_debug(
+                            f"[TURNTABLE COUNT] Xac thuc nut + mam xoay thanh cong ({spin_elapsed:.1f}s): +2 SP | Tong: {self.total_products} SP",
+                            self.product_id
+                        )
+                    else:
+                        self.turntable_state = 'IDLE'
+                        self.turntable_spin_frames = 0
+            elif self.turntable_state == 'ERROR_SPIN_ANOMALY':
+                # Đang trong trạng thái kẹt xoay liên tục -> Chờ cho đến khi mâm dừng hẳn
+                if not self.is_turntable_moving:
+                    self.log_debug("[TURNTABLE ANOMALY] Mam xoay da dung lai sau su co xoay lien tuc. Huy bo chu ky loi, quay ve IDLE.", self.product_id)
+                    self.turntable_state = 'IDLE'
+                    self.turntable_spin_frames = 0
+                    self.turntable_last_count_time = curr_time
+        else:
+            self.turntable_state = 'COOLDOWN_LOCK'

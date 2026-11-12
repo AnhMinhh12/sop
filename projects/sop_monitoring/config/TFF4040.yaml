@@ -1,14 +1,25 @@
 station_id: "machine_07"
 station_name: "Station 07 - Máy 7 (TFF4040)"
 
+# CẤU HÌNH BỘ ĐẾM SẢN PHẨM DÙNG CHUNG (UNIVERSAL COUNTER)
+production_counter:
+  enabled: true
+  products_per_cycle: 2               # Định mức: +2 sản phẩm mỗi lần xoay mâm
+  trigger_mode: "single_button"        # Ấn 1 nút bên phải
+  button_zones: ["button_right"]
+  motion_verify_zone: "mold"           # Kiểm tra chuyển động mâm xoay ở vùng khuôn
+  verify_timeout_seconds: 2.5         # Chờ mâm xoay trong 2.5s sau khi ấn nút
+  cooldown_seconds: 5.0               # Khóa chống đếm đúp trong 5.0s
+  motion_threshold: 0.05              # Ngưỡng pixel chuyển động tối thiểu 5%
+
 # ĐỊNH NGHĨA CÁC VÙNG ĐA GIÁC (POLYGONS)
 zones:
   # --- Tọa độ Camera thực tế ---
-  mold: [[0.409, 0.622], [0.573, 0.478], [0.705, 0.714], [0.533, 0.911]]
-  button_right: [[0.295, 0.714], [0.342, 0.678], [0.319, 0.628], [0.28, 0.647]]
-  middle_table: [[0.402, 0.525], [0.544, 0.431], [0.503, 0.336], [0.384, 0.408]]
+  mold: [[0.377, 0.711], [0.544, 0.547], [0.675, 0.786], [0.505, 0.992]]
+  button_right: [[0.233, 0.733], [0.27, 0.706], [0.291, 0.758], [0.25, 0.792]]
+  middle_table: [[0.345, 0.456], [0.452, 0.378], [0.486, 0.439], [0.377, 0.528]]
   # Vùng tham chiếu để chọn 2 tay gần nhất (bao quanh mold + middle_table)
-  work_area: [[0.278, 0.294], [0.647, 0.131], [0.973, 0.619], [0.361, 0.939]]
+  work_area: [[0.164, 0.519], [0.589, 0.231], [0.97, 0.572], [0.389, 0.978]]
 # QUY TRÌNH SOP CHI TIẾT (5 BƯỚC MỚI)
 steps:
   # Bước 1: Robot lấy 2 sản phẩm ra khỏi khuôn

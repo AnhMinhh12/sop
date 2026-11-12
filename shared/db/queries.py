@@ -273,7 +273,7 @@ class EventQueries:
             downtime_count = downtime_row["cnt"] if downtime_row else 0
             downtime_sec = float(downtime_row["total_sec"]) if downtime_row else 0.0
 
-            # Đếm số lần robot thò tay lấy sản phẩm và tổng sản phẩm hoàn thành (Máy 7)
+            # Đếm số lần robot thò tay lấy sản phẩm và tổng sản phẩm hoàn thành từ bộ đếm (product_pickup)
             cursor.execute(f"""
                 SELECT COUNT(*) as cnt, COALESCE(SUM(duration), 0) as total_prod FROM sop_events e
                 {"JOIN sop_cameras c ON e.camera_id = c.id" if camera_id else ""}
@@ -282,6 +282,12 @@ class EventQueries:
             """, tuple(params))
             prod_row = cursor.fetchone()
             robot_pickups = prod_row["cnt"] if prod_row else 0
+            pickup_products = int(prod_row["total_prod"]) if prod_row else 0
+
+            # NẾU trạm/camera có sự kiện từ bộ đếm sản phẩm (product_pickup / robot_pickup)
+            # thì ưu tiên lấy chính xác số sản phẩm thực tế đó làm 'total_products'
+            if pickup_products > 0 or robot_pickups > 0:
+                total_products = pickup_products
 
             res = {
                 "total_violations": violations,

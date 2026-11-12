@@ -68,7 +68,8 @@ def emit_step_update(camera_id, status_data, hands_detected):
         'machine_stopped_duration': status_data.get('machine_stopped_duration', 0.0),
         'stop_count': status_data.get('stop_count', 0),
         'total_downtime_sec': status_data.get('total_downtime_sec', 0.0),
-        'machine_status': status_data.get('machine_status', 'running')
+        'machine_status': status_data.get('machine_status', 'running'),
+        'total_products': status_data.get('total_products', 0)
     })
 
 def emit_violation(camera_id, violation_data):
