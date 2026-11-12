@@ -61,6 +61,10 @@ shared/assets/sounds/**/*.wav
 .pytest_cache/
 .ipynb_checkpoints/
 *.log
+scratch/
+push_to_nam.bat
+push_to_nam.ps1
+
 
 # Environments
 .env.*
