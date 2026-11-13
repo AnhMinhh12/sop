@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+data/logs/*
+data/violations/*
+scratch
+edge_dist
+*.tar.gz
+*.zip
+

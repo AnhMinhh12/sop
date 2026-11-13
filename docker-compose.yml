@@ -1,0 +1,30 @@
+services:
+  ai-monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai_monitoring_hub:latest
+    container_name: ai_monitoring_hub
+    restart: unless-stopped
+    # Dùng network_mode: host để kéo luồng RTSP camera cục bộ với độ trễ thấp nhất
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+    volumes:
+      # Code & Cấu hình để chỉnh sửa có hiệu lực ngay khi restart
+      - ./.env:/app/.env
+      - ./config/config.yaml:/app/config/config.yaml
+      - ./projects:/app/projects
+      - ./shared:/app/shared
+      - ./app:/app/app
+      - ./main.py:/app/main.py
+      # Lưu trữ video vi phạm và log ra ổ cứng máy chủ
+      - ./data/violations:/app/data/violations
+      - ./data/logs:/app/data/logs
+    # Bỏ comment nếu máy chủ cắm loa trực tiếp (jack 3.5mm hoặc USB) để phát còi cảnh báo:
+    # devices:
+    #   - /dev/snd:/dev/snd
+
