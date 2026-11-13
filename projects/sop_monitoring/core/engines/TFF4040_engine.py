@@ -962,22 +962,31 @@ class ProductEngine(BaseEngine):
         if motion_score > 1000 or hand_in_btn:
             self.log_debug(f"[TURNTABLE PROBE] state={self.turntable_state}, score={motion_score}, moving={self.is_turntable_moving}, btn={hand_in_btn}, spin_frames={self.turntable_spin_frames}, peak={getattr(self, 'turntable_peak_motion', 0)}", self.product_id)
 
-        # 2. Máy trạng thái hữu hạn (FSM) - BẮT BUỘC ẤN NÚT (TRIGGER) -> MÂM QUAY XONG MỚI TÍNH +2 SP
-        # Loại bỏ 100% việc tự đếm khi đặt phôi hoặc robot thò tay:
-        # Bắt buộc phải có ấn nút button_right trước, sau đó mâm xoay xong mới tính.
+        # 2. Máy trạng thái hữu hạn (FSM) - BẬT CHẾ ĐỘ NHẬN DIỆN MÂM XOAY LINH HOẠT:
+        # - Nếu có bấm nút (hand_in_btn): Chờ mâm xoay trong tối đa 10.0 giây (chống trễ khí nén/cơ khí).
+        # - Nếu vẽ lại nút bấm hoặc vùng nút lệch/chưa chạm tới nút: Nếu mâm xoay thật sự (chuyển động diện rộng
+        #   đặc trưng > 5000 pixel, vượt xa bàn tay đặt phôi chỉ < 3500), hệ thống vẫn tự động kích hoạt FSM
+        #   để không bao giờ bị hụt nhịp đếm sản phẩm!
         if (curr_time - self.turntable_last_count_time) > self.turntable_debounce_sec:
             # Thoát COOLDOWN_LOCK chuyển về IDLE để sẵn sàng đón lượt xoay tiếp theo
             if self.turntable_state == 'COOLDOWN_LOCK':
                 self.turntable_state = 'IDLE'
 
             if self.turntable_state == 'IDLE':
-                # Chỉ kích hoạt chờ mâm quay khi có ấn nút xanh (button_right)
+                # Trường hợp 1: Có ấn nút xanh (button_right)
                 if hand_in_btn:
                     self.turntable_state = 'TRIGGERED_WAIT_SPIN'
                     self.turntable_trigger_time = curr_time
                     self.turntable_spin_frames = 0
                     self.turntable_spin_gap_frames = 0
                     self.turntable_peak_motion = 0
+                # Trường hợp 2: Dù vùng nút vẽ ở đâu/chưa chạm, nếu mâm bắt đầu quay mạnh (> 5000)
+                elif motion_score > int(5000 * scale_factor):
+                    self.turntable_state = 'SPINNING'
+                    self.turntable_spin_start_time = curr_time
+                    self.turntable_spin_frames = 1
+                    self.turntable_spin_gap_frames = 0
+                    self.turntable_peak_motion = motion_score
 
             elif self.turntable_state == 'TRIGGERED_WAIT_SPIN':
                 if self.is_turntable_moving:
@@ -986,8 +995,8 @@ class ProductEngine(BaseEngine):
                     self.turntable_spin_frames = 1
                     self.turntable_spin_gap_frames = 0
                     self.turntable_peak_motion = motion_score
-                elif (curr_time - self.turntable_trigger_time) > 4.0:
-                    # Quá 4.0s sau khi ấn nút mà không thấy mâm quay thì tự hủy về IDLE
+                elif (curr_time - self.turntable_trigger_time) > 10.0:
+                    # Chờ tối đa 10.0s sau khi ấn nút để bao quát toàn bộ độ trễ cơ khí
                     self.turntable_state = 'IDLE'
                     self.turntable_spin_frames = 0
 
