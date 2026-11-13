@@ -7,7 +7,7 @@
     <title>AI Monitoring Hub - HTMP Systems</title>
 
     <!-- Localized Dependencies -->
-    <script src="{{ config.HUB_URL }}{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
     <style>
         @font-face {
             font-family: 'SystemSans';
@@ -350,7 +350,7 @@
             <!-- Card 1: Presence Check -->
             <div class="card">
                 <div class="card-preview">
-                    <img src="{{ config.HUB_URL }}{{ url_for('static', filename='illustration/check_person.jpg') }}" 
+                    <img src="{{ url_for('static', filename='illustration/check_person.jpg') }}" 
                          class="absolute inset-0 w-full h-full object-cover" alt="Presence Check">
                     <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>
@@ -358,7 +358,7 @@
                     <h3>Kiểm tra người đứng máy</h3>
                     <p>Giám sát sự hiện diện của nhân sự tại trạm làm việc, cảnh báo khi vắng mặt quá thời gian quy
                         định.</p>
-                    <a href="#" onclick="location.href='http://'+window.location.hostname+':5000/'"
+                    <a href="{{ config.HUB_URL or 'http://10.0.9.254:5000' }}"
                         class="btn-view">View Details</a>
                 </div>
             </div>
@@ -366,7 +366,7 @@
             <!-- Card 2: SOP Monitoring -->
             <div class="card">
                 <div class="card-preview">
-                    <img src="{{ config.HUB_URL }}{{ url_for('static', filename='illustration/sop.jpg') }}" 
+                    <img src="{{ url_for('static', filename='illustration/sop.jpg') }}" 
                          class="absolute inset-0 w-full h-full object-cover" alt="SOP Monitoring">
                     <div class="status-badge active" style="z-index: 10;"><span class="status-dot"></span>Active</div>
                 </div>

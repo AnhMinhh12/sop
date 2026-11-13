@@ -57,6 +57,7 @@ class ProductEngine(BaseEngine):
         self._zone_entry_time = {}
         self._zone_triggered = {}
         self._hand_entry_time = {}
+        self._hit_registered = {}
         self.hand_history = {"left": [], "right": []}
         self.hit_count = 0
         self.last_trigger_states = {}
@@ -313,6 +314,7 @@ class ProductEngine(BaseEngine):
         self._zone_entry_time = {}
         self._zone_triggered = {}
         self._hand_entry_time = {}
+        self._hit_registered = {}
         self.hit_count = 0
         self.last_completed_zone = None
         self.last_completed_time = now if now else time.time()
@@ -348,6 +350,7 @@ class ProductEngine(BaseEngine):
         self._zone_entry_time = {}
         self._zone_triggered = {}
         self._hand_entry_time = {}
+        self._hit_registered = {}
         if self.current_step_idx >= len(self.sop_steps):
             self._completed_at = now
 
