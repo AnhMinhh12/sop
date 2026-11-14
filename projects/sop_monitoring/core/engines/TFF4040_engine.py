@@ -106,10 +106,10 @@ class ProductEngine(BaseEngine):
         self.is_turntable_moving = False
 
         # Tải số lần và thời gian dừng máy, số sản phẩm đã ghi nhận trong ngày từ DB
-        self.current_date = time.strftime('%Y-%m-%d')
         try:
             from shared.db.queries import EventQueries
-            db_summary = EventQueries.get_daily_summary(self.current_date, camera_id=self.station_id)
+            today_str = time.strftime('%Y-%m-%d')
+            db_summary = EventQueries.get_daily_summary(today_str, camera_id=self.station_id)
             self.stop_count = int(db_summary.get("total_downtime_count", 0))
             self.total_downtime_sec = float(db_summary.get("total_downtime_sec", 0.0))
             self.robot_pickups = int(db_summary.get("robot_pickups", 0))
@@ -124,15 +124,6 @@ class ProductEngine(BaseEngine):
     def update(self, hands_data: List[Dict], products_data: List[Dict] = None,
                robot_data: List[Dict] = None) -> Dict[str, Any]:
         now = time.time()
-        # Reset chỉ số ngày mới nếu qua 0h
-        today = time.strftime('%Y-%m-%d')
-        if hasattr(self, 'current_date') and today != self.current_date:
-            self.current_date = today
-            self.total_products = 0
-            self.stop_count = 0
-            self.total_downtime_sec = 0.0
-            self.robot_pickups = 0
-
         self.last_hands = hands_data
         self.last_products = products_data if products_data is not None else []
         self.last_robots = robot_data if robot_data is not None else []
