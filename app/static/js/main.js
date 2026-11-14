@@ -1060,7 +1060,7 @@ function renderStationDetail(cam) {
                 <div class="station-header">
                     <div class="station-name">${cam.name}</div>
                     <div class="flex items-center gap-2">
-                        <span id="station-product-count-${cam.id}" class="badge-tag bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-sm">0 SP</span>
+                        <span id="station-product-count-${cam.id}" class="badge-tag bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-sm">Sản lượng: ${cam.total_products !== undefined ? cam.total_products : 0} SP</span>
                         <div id="status-${cam.id}" class="status-indicator">${cam.monitoring_enabled === false ? 'ĐÃ TẮT GIÁM SÁT' : 'READY'}</div>
                     </div>
                 </div>
