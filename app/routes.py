@@ -217,10 +217,21 @@ def get_ui_manifest():
 def get_cameras():
     config = ConfigLoader.load_config()
     cameras = []
+    today_str = time.strftime('%Y-%m-%d')
     for camera in config.get("cameras", []):
         item = dict(camera)
-        processor = processors.get(camera.get("id"))
+        cam_id = camera.get("id")
+        processor = processors.get(cam_id)
         item['monitoring_enabled'] = processor.monitoring_enabled if processor else None
+        # Lấy sản lượng trong ngày hôm nay cho trạm
+        if processor and hasattr(processor, 'today_products'):
+            item['total_products'] = processor.today_products
+        else:
+            try:
+                db_summary = EventQueries.get_daily_summary(today_str, camera_id=cam_id)
+                item['total_products'] = int(db_summary.get("total_products", 0))
+            except Exception:
+                item['total_products'] = 0
         cameras.append(item)
     return jsonify(cameras)
 
