@@ -141,6 +141,8 @@ class EventQueries:
         Truy vấn danh sách các vi phạm gần đây nhất từ sop_events.
         """
         conn = db.get_connection()
+        if conn is None:
+            return []
         cursor = conn.cursor()
 
         try:
@@ -164,6 +166,8 @@ class EventQueries:
     def get_violation_counts() -> Dict[str, int]:
         """Thống kê tổng số vi phạm theo loại (tất cả thời gian)."""
         conn = db.get_connection()
+        if conn is None:
+            return {}
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -331,6 +335,8 @@ class EventQueries:
             product_id = None
             
         conn = db.get_connection()
+        if conn is None:
+            return {}
         cursor = conn.cursor()
         try:
             where_clause = "WHERE DATE(e.timestamp) = %s AND (e.sop_status = 'violation' OR e.violation_type = 'machine_stop')"
@@ -395,6 +401,8 @@ class EventQueries:
             end_of_week = start_of_week + datetime.timedelta(days=6)
             
             conn = db.get_connection()
+            if conn is None:
+                return {}
             cursor = conn.cursor()
             
             where_clause = "WHERE DATE(e.timestamp) >= %s AND DATE(e.timestamp) <= %s AND e.sop_status = 'violation'"
@@ -461,6 +469,8 @@ class EventQueries:
             product_id = None
             
         conn = db.get_connection()
+        if conn is None:
+            return {}
         cursor = conn.cursor()
         try:
             where_clause = "WHERE DATE(e.timestamp) = %s"
@@ -541,6 +551,8 @@ class EventQueries:
         Truy vấn vi phạm theo camera station_id.
         """
         conn = db.get_connection()
+        if conn is None:
+            return {}
         cursor = conn.cursor()
 
         try:
@@ -574,6 +586,8 @@ class EventQueries:
         """
         import math
         conn = db.get_connection()
+        if conn is None:
+            return {}
         cursor = conn.cursor()
         try:
             where_clauses = []
@@ -809,6 +823,8 @@ class CameraQueries:
         Thêm hoặc cập nhật camera. Trả về camera id.
         """
         conn = db.get_connection()
+        if conn is None:
+            return None
         cursor = conn.cursor()
 
         try:
@@ -847,6 +863,8 @@ class CameraQueries:
     def get_all_cameras() -> List[Dict[str, Any]]:
         """Lấy danh sách tất cả camera SOP."""
         conn = db.get_connection()
+        if conn is None:
+            return []
         cursor = conn.cursor()
         try:
             cursor.execute("""
@@ -867,6 +885,8 @@ class CameraQueries:
     def update_status(station_id: str, status: str) -> None:
         """Cập nhật trạng thái camera."""
         conn = db.get_connection()
+        if conn is None:
+            return
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -884,6 +904,8 @@ class CameraQueries:
     def update_camera_definition(station_id: str, definition_id: int) -> None:
         """Cập nhật liên kết giữa camera và định nghĩa SOP mới."""
         conn = db.get_connection()
+        if conn is None:
+            return
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -902,6 +924,8 @@ class CameraQueries:
     def get_products_by_camera(station_id: str) -> List[Dict[str, Any]]:
         """Lấy danh sách các mã sản phẩm (definitions) liên kết hoặc từng chạy trên camera."""
         conn = db.get_connection()
+        if conn is None:
+            return []
         cursor = conn.cursor()
         try:
             cursor.execute("""
@@ -934,6 +958,8 @@ class DefinitionQueries:
                           total_steps: int = 0) -> Optional[int]:
         """Thêm hoặc lấy definition. Trả về definition_id."""
         conn = db.get_connection()
+        if conn is None:
+            return None
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -965,6 +991,8 @@ class DefinitionQueries:
         Xóa bước cũ, thêm bước mới.
         """
         conn = db.get_connection()
+        if conn is None:
+            return None
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -1004,6 +1032,8 @@ class DefinitionQueries:
     def get_steps(definition_id: int) -> List[Dict[str, Any]]:
         """Lấy danh sách bước theo definition."""
         conn = db.get_connection()
+        if conn is None:
+            return []
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -1023,6 +1053,8 @@ class DefinitionQueries:
     def get_all_definitions() -> List[Dict[str, Any]]:
         """Lấy danh sách tất cả định nghĩa SOP (mã hàng)."""
         conn = db.get_connection()
+        if conn is None:
+            return []
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT id, name FROM sop_definitions ORDER BY name")

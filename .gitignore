@@ -45,6 +45,7 @@ projects/sop_monitoring/training/dataset *.rar
 *.sqlite-journal
 *.sqlite-shm
 *.sqlite-wal
+*.sql
 
 # Ignore all weights in shared/models but keep structure
 shared/models/**/*.onnx

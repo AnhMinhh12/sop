@@ -65,6 +65,8 @@ class StorageCleanup:
     def _cleanup_by_time(self):
         """Deletes clips older than the retention period."""
         conn = db.get_connection()
+        if conn is None:
+            return
         cursor = conn.cursor()
         try:
             # MySQL syntax to find records older than N days
@@ -120,6 +122,8 @@ class StorageCleanup:
     def _delete_oldest_clips(self) -> None:
         """Deletes oldest clips from DB (sop_clips) and disk."""
         conn = db.get_connection()
+        if conn is None:
+            return
         cursor = conn.cursor()
 
         try:

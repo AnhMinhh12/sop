@@ -139,12 +139,23 @@ Hệ thống được cấu hình hoàn toàn thông qua file `config/config.yam
 
 ## 🚀 Khởi chạy hệ thống
 
-### Chạy ứng dụng chính
+### Cách 1: Chạy bằng Docker (Khuyến nghị cho Production)
+Hệ thống đã được đóng gói sẵn Docker Compose, tự động khởi động cùng hệ thống và tối ưu mạng RTSP:
+```bash
+# Khởi chạy nền
+docker compose up -d
+
+# Xem log trực tiếp
+docker compose logs -f
+```
+> 📘 **Xem sổ tay hướng dẫn chi tiết các lệnh Docker tại:** [DOCKER_GUIDE.md](DOCKER_GUIDE.md).
+
+### Cách 2: Chạy trực tiếp qua Python (Môi trường phát triển)
 Chạy lệnh sau từ thư mục gốc để khởi chạy toàn bộ luồng giám sát camera cùng máy chủ Flask Web Dashboard:
 ```bash
 python main.py
 ```
-Sau khi hệ thống khởi động thành công, Dashboard hiển thị tại địa chỉ: `http://localhost:5001`.
+Sau khi hệ thống khởi động thành công, Dashboard hiển thị tại địa chỉ: `http://localhost:5001` (hoặc cổng được cấu hình trong `.env`).
 
 ### Các công cụ bổ trợ phát triển
 Dưới thư mục `shared/tools/` cung cấp sẵn một số công cụ để thiết lập và huấn luyện hệ thống:
