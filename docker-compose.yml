@@ -11,9 +11,13 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=Asia/Ho_Chi_Minh
       - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=1
     volumes:
+      # Múi giờ Việt Nam (UTC+7) đồng bộ từ máy chủ
+      - /usr/share/zoneinfo/Asia/Ho_Chi_Minh:/etc/localtime:ro
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       # Code & Cấu hình để chỉnh sửa có hiệu lực ngay khi restart
       - ./.env:/app/.env
       - ./config/config.yaml:/app/config/config.yaml
