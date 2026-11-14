@@ -1,25 +1,25 @@
 """
-Train YOLOv11 trên Google Colab — Mã Sản Phẩm TK_1A00-V0022
-============================================================
-3 Classes chuẩn từ Roboflow (TK_1A00-V0022.v1i.yolov11 / data.yaml):
-  0: accessory (Phụ kiện / linh kiện phụ)
-  1: hand      (Bàn tay công nhân)
-  2: product   (Sản phẩm chính)
+Train YOLOv11 trên Google Colab — Trạm Lắp Ráp 8 Ốc (laprap_8_oc)
+================================================================
+4 Classes chuẩn từ Roboflow (laprap_hanh.v1i.yolov11):
+  0: hand      (Bàn tay công nhân)
+  1: part_hand (Sản phẩm cầm trên tay thao tác)
+  2: part_tray (Sản phẩm nằm dưới khay 5 ngăn)
+  3: screw     (Ốc / chốt trắng đã cắm trên thân chi tiết)
 
-Tự động hóa:
+Cải tiến thông minh:
   - Tự động nhận diện bài toán Segmentation (YOLO11-seg) hay Bounding Box (YOLO11-detect)
-  - Tự động tìm kiếm file zip `TK_1A00-V0022.v1i.yolov11.zip` hoặc thư mục trên Google Drive / Colab
-  - Cập nhật chuẩn hóa path trong data.yaml
-  - Tự động export ONNX chuẩn: `TK_1A00-V0022.onnx` (để dùng trực tiếp trong hệ thống AI)
-  - Verify lại model ONNX với dummy inference
-  - Tự động backup vào Google Drive: `MyDrive/yolo11_safe_backup/`
+  - Tự động tìm kiếm file zip `laprap_hanh.v1i.yolov11.zip` hoặc thư mục trên Google Drive / Colab
+  - Cập nhật tự động path trong data.yaml tránh lỗi đường dẫn
+  - Tối ưu Augmentation cho chi tiết xoay chéo (degrees=15°) và phát hiện ốc nhỏ (close_mosaic)
+  - Tự động export ONNX chuẩn: `laprap.onnx` (để dùng trực tiếp trong shared/models/yolo/)
+  - Verify lại model với dummy inference
 
 Cách dùng:
-  1. Nén thư mục dataset thành file `TK_1A00-V0022.v1i.yolov11.zip` rồi upload lên Google Drive (MyDrive).
-     (Hoặc kéo thả trực tiếp file zip vào tab Files của Colab)
-  2. Mở Google Colab -> Runtime > Change runtime type > T4 GPU.
-  3. Copy toàn bộ code file này -> paste vào 1 cell trên Colab -> Run (Shift + Enter).
-  4. Sau khi train xong, tải file `TK_1A00-V0022.onnx` về máy.
+  1. Upload file `laprap_hanh.v1i.yolov11.zip` lên Google Drive (MyDrive).
+  2. Mở Google Colab → Runtime > Change runtime type > T4 GPU.
+  3. Copy toàn bộ code file này → paste vào 1 cell trên Colab → Run (Shift + Enter).
+  4. Sau khi train xong, tải file `laprap.onnx` về chép vào `shared/models/yolo/`.
 """
 
 import os
@@ -28,15 +28,15 @@ import subprocess
 from pathlib import Path
 
 # ==== CẤU HÌNH DATASET / MODEL ====
-DATASET_NAME = "TK_1A00-V0022.v1i.yolov11"
-PRODUCT_CODE = "TK_1A00-V0022"
+DATASET_NAME = "laprap_hanh.v1i.yolov11"
+PRODUCT_CODE = "laprap"
 DRIVE_DATASET_ZIP = f"/content/drive/MyDrive/{DATASET_NAME}.zip"
 DRIVE_DATASET_DIR = f"/content/{DATASET_NAME}"
 DATA_YAML = os.path.join(DRIVE_DATASET_DIR, "data.yaml")
 DRIVE_PROJECT_DIR = "/content/drive/MyDrive/yolo_runs"
 
 # Model mặc định: yolo11n.pt (script sẽ tự chuyển thành yolo11n-seg.pt nếu dataset là polygon)
-# Có thể đổi thành yolo11s.pt / yolo11m.pt nếu muốn model chính xác hơn
+# Có thể đổi thành yolo11s.pt / yolo11s-seg.pt nếu muốn model khỏe hơn
 MODEL_SIZE = "yolo11n.pt"
 
 # Epochs & Hyperparameters
@@ -78,7 +78,7 @@ except ImportError:
 
 
 # =====================================================================
-# 2) CÀI ĐẶT THƯ VIỆN
+# 2) CÀI ĐẶT
 # =====================================================================
 print("\n" + "=" * 60)
 print("2) CÀI ĐẶT THƯ VIỆN")
@@ -127,12 +127,9 @@ else:
     def normalized_name(value):
         return "".join(ch for ch in value.lower() if ch.isalnum())
 
-    expected_name = normalized_name(PRODUCT_CODE)
-    # Ưu tiên tìm file có chứa mã sản phẩm TK_1A00-V0022 hoặc tên dataset
-    zip_matches = [
-        p for p in zip_candidates
-        if expected_name in normalized_name(p.stem) or "tk1a00v0022" in normalized_name(p.stem)
-    ]
+    expected_name = normalized_name(DATASET_NAME)
+    # Ưu tiên tìm file có chứa 'laprap' hoặc tên dataset
+    zip_matches = [p for p in zip_candidates if "laprap" in normalized_name(p.stem) or expected_name in normalized_name(p.stem)]
     if zip_matches:
         found_zip = str(zip_matches[0])
         print(f"✅ Tự động tìm thấy file zip: {found_zip}")
@@ -152,10 +149,7 @@ else:
     # Nếu không có zip, tìm thư mục trên Drive
     drive_folder = f"/content/drive/MyDrive/{DATASET_NAME}"
     if not os.path.exists(drive_folder) and os.path.exists("/content/drive/MyDrive/"):
-        folder_matches = [
-            p for p in Path("/content/drive/MyDrive/").glob("*")
-            if p.is_dir() and "tk_1a00" in p.name.lower()
-        ]
+        folder_matches = [p for p in Path("/content/drive/MyDrive/").rglob("*laprap*") if p.is_dir()]
         if folder_matches:
             drive_folder = str(folder_matches[0])
             print(f"✅ Tự động tìm thấy thư mục dataset trên Drive: {drive_folder}")
@@ -171,13 +165,13 @@ if not os.path.exists(DATA_YAML):
     search_paths = (
         list(Path(DRIVE_DATASET_DIR).rglob("data.yaml")) + 
         list(Path(DRIVE_DATASET_DIR).rglob("data.yml")) +
-        list(Path("/content/").glob("**/*tk*/**/data.yaml")) +
-        list(Path("/content/").glob("**/*tk*/**/data.yml"))
+        list(Path("/content/").glob("**/*laprap*/**/data.yaml")) +
+        list(Path("/content/").glob("**/*laprap*/**/data.yml"))
     )
     if not search_paths and os.path.exists("/content/drive/MyDrive/"):
         search_paths = (
-            list(Path("/content/drive/MyDrive/").glob("**/*tk*/**/data.yaml")) +
-            list(Path("/content/drive/MyDrive/").glob("**/*tk*/**/data.yml"))
+            list(Path("/content/drive/MyDrive/").glob("**/*laprap*/**/data.yaml")) +
+            list(Path("/content/drive/MyDrive/").glob("**/*laprap*/**/data.yml"))
         )
     if not search_paths:
         broad_paths = []
@@ -208,7 +202,7 @@ print(f"📄 Dataset YAML: {DATA_YAML}")
 
 # Chuẩn hóa đường dẫn trong data.yaml
 import yaml as _yaml
-with open(DATA_YAML, "r", encoding="utf-8") as f:
+with open(DATA_YAML, "r") as f:
     try:
         _data = _yaml.safe_load(f)
     except Exception as e:
@@ -226,16 +220,13 @@ if _data:
                 except ValueError:
                     _data[key] = f"{key}/images"
     
-    with open(DATA_YAML, "w", encoding="utf-8") as f:
+    with open(DATA_YAML, "w") as f:
         _yaml.safe_dump(_data, f, default_flow_style=False)
     print("📝 Đã chuẩn hóa đường dẫn trong file data.yaml.")
 
 print("\n--- Nội dung data.yaml ---")
-with open(DATA_YAML, "r", encoding="utf-8") as f:
+with open(DATA_YAML, "r") as f:
     print(f.read())
-
-# Default fallback nếu data.yaml thiếu class
-default_classes = {0: 'accessory', 1: 'hand', 2: 'product'}
 
 if _data and "names" in _data:
     names_raw = _data["names"]
@@ -244,9 +235,9 @@ if _data and "names" in _data:
     elif isinstance(names_raw, list):
         class_names_map = {i: str(v) for i, v in enumerate(names_raw)}
     else:
-        class_names_map = default_classes
+        class_names_map = {0: 'hand', 1: 'part_hand', 2: 'part_tray', 3: 'screw'}
 else:
-    class_names_map = default_classes
+    class_names_map = {0: 'hand', 1: 'part_hand', 2: 'part_tray', 3: 'screw'}
 
 print(f"\n📋 Danh sách class ({len(class_names_map)} classes): {class_names_map}")
 
@@ -261,19 +252,22 @@ for split in ["train", "valid"]:
     if lbl_dir.exists():
         for lbl_file in lbl_dir.glob("*.txt"):
             try:
-                with open(lbl_file, "r", encoding="utf-8") as lf:
+                with open(lbl_file, "r") as lf:
                     for line in lf:
                         tokens = line.strip().split()
                         if not tokens or tokens[0].startswith("#"):
                             continue
                         try:
+                            # Class ID phải là số nguyên
                             _ = int(tokens[0])
-                            _ = [float(x) for x in tokens[1:]]
+                            # Các giá trị tọa độ phải là số thực
+                            coords = [float(x) for x in tokens[1:]]
                             if len(tokens) == 5:
                                 box_count += 1
                             elif len(tokens) >= 7 and len(tokens) % 2 == 1:
                                 seg_count += 1
                         except ValueError:
+                            # Bỏ qua các dòng text / chú thích
                             continue
             except Exception:
                 continue
@@ -316,7 +310,7 @@ for split in ("train", "valid", "test"):
             if os.path.isdir(lbl_dir):
                 for lbl_file in os.listdir(lbl_dir):
                     if lbl_file.endswith(".txt"):
-                        with open(os.path.join(lbl_dir, lbl_file), "r", encoding="utf-8") as f:
+                        with open(os.path.join(lbl_dir, lbl_file)) as f:
                             for line in f:
                                 parts = line.strip().split()
                                 if parts:
@@ -330,20 +324,20 @@ for split in ("train", "valid", "test"):
 print("\nPhân bố class trong train set:")
 for cls_id in sorted(class_names_map.keys()):
     name = class_names_map[cls_id]
-    count = class_counts.get(cls_id, 0)
+    count = class_counts[cls_id]
     bar = "█" * (min(count, 500) // 10)
-    print(f"  [{cls_id}] {name:<12}: {count:>5} {bar}")
+    print(f"  [{cls_id}] {name:<10}: {count:>5} {bar}")
 
 
 # =====================================================================
-# 5) TRAIN YOLOv11 TỐI ƯU CHO MÃ TK_1A00-V0022
+# 5) TRAIN YOLOv11 TỐI ƯU CHO LẮP RÁP 8 ỐC
 # =====================================================================
 print("\n" + "=" * 60)
 print(f"5) TRAIN - {EPOCHS} epochs, batch={BATCH_SIZE}, imgsz={IMG_SIZE}")
-print(f"   Model: {MODEL_SIZE} | Product: {PRODUCT_CODE}")
+print(f"   Model: {MODEL_SIZE} | Degrees=15.0° | Close_mosaic=15")
 print("=" * 60)
 
-# Xóa cache nhãn cũ
+# Xóa cache nhãn cũ để tránh xung đột giữa detect và segment
 sh(f"find '{DRIVE_DATASET_DIR}' -name '*.cache' -delete 2>/dev/null")
 
 from ultralytics import YOLO
@@ -364,22 +358,23 @@ model.train(
     optimizer="auto",
     seed=42,
     augment=True,
-    # Augmentation tối ưu cho thao tác lắp ráp/kiểm tra linh kiện
+    # Augmentation tối ưu cho lắp ráp
     hsv_h=0.015,     # Tăng biến thiên màu nhẹ
-    hsv_s=0.7,       # Tăng bão hòa màu để phân biệt sản phẩm vs phụ kiện vs tay
-    hsv_v=0.4,       # Biến thiên độ sáng môi trường xưởng
+    hsv_s=0.7,       # Tăng bão hòa màu để phân biệt ốc trắng vs nhựa đen
+    hsv_v=0.4,       # Biến thiên độ sáng (bóng đèn trần chiếu)
     translate=0.1,   # Dịch chuyển nhẹ
-    scale=0.5,       # Đổi tỉ lệ xa gần khi cầm sản phẩm/phụ kiện
+    scale=0.5,       # Đổi tỉ lệ xa gần khi công nhân nhấc chi tiết lên
     fliplr=0.5,      # Lật ngang
-    flipud=0.0,      # Giữ nguyên góc nhìn camera từ trên xuống
-    degrees=15.0,    # Xoay ±15° linh hoạt khi cầm nghiêng sản phẩm
+    flipud=0.0,      # Giữ nguyên hướng nhìn từ trên xuống bàn thao tác
+    degrees=15.0,    # Xoay ±15° vì chi tiết được xoay nghiêng/dọc khi lắp
     perspective=0.0005,
-    mosaic=1.0,         # Ghép 4 ảnh tăng bối cảnh
-    mixup=0.1,          # Trộn ảnh nhẹ
+    # Augmentation nâng cao
+    mosaic=1.0,         # Ghép 4 ảnh tăng context
+    mixup=0.1,          # Trộn ảnh
     copy_paste=0.2 if is_segmentation else 0.0,
-    close_mosaic=15,    # Tắt mosaic 15 epoch cuối để hội tụ chính xác viền vật thể
+    close_mosaic=15,    # Tắt mosaic ở 15 epoch cuối để học chính xác chi tiết viền & ốc nhỏ
     cos_lr=True,        # Giảm learning rate theo cosine
-    amp=True,           # Tối ưu FP16 trên Colab GPU T4
+    amp=True,           # Tối ưu bộ nhớ GPU T4
 )
 
 
@@ -435,16 +430,20 @@ model.export(
 
 best_onnx_source = best_weights.replace(".pt", ".onnx")
 onnx_path = os.path.join(EXPORT_DIR, f"{PRODUCT_CODE}.onnx")
+onnx_path_alt = os.path.join(EXPORT_DIR, "laprap_8_oc.onnx")
 
 if os.path.exists(best_onnx_source):
     shutil.copy2(best_onnx_source, onnx_path)
+    shutil.copy2(best_onnx_source, onnx_path_alt)
     print(f"  ✅ Copy thành công: {onnx_path}")
+    print(f"  ✅ Copy backup tên dài: {onnx_path_alt}")
 else:
     runs_dir = Path("/content/runs")
     found = False
     for f in runs_dir.rglob("*.onnx"):
         shutil.copy2(f, onnx_path)
-        print(f"  ✅ Copy thành công từ fallback: {f} -> {onnx_path}")
+        shutil.copy2(f, onnx_path_alt)
+        print(f"  ✅ Copy thành công từ fallback: {f} → {onnx_path}")
         found = True
         break
     if not found:
@@ -489,15 +488,18 @@ for f in ["best.pt", "last.pt"]:
     if os.path.exists(src):
         dst = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}_{f}")
         shutil.copy2(src, dst)
-        print(f"  Backup PyTorch model -> {dst}")
+        print(f"  Backup PyTorch model → {dst}")
 
 # Copy model ONNX
 if os.path.exists(onnx_path):
     dst_onnx = os.path.join(SAFE_DIR, f"{PRODUCT_CODE}.onnx")
+    dst_onnx_alt = os.path.join(SAFE_DIR, "laprap_8_oc.onnx")
     shutil.copy2(onnx_path, dst_onnx)
-    print(f"  Backup ONNX model -> {dst_onnx}")
+    shutil.copy2(onnx_path, dst_onnx_alt)
+    print(f"  Backup ONNX model → {dst_onnx}")
+    print(f"  Backup ONNX model → {dst_onnx_alt}")
 
-print(f"\n🛡️ Thư mục backup an toàn tại: {SAFE_DIR}")
+print(f"\n🛡 Thư mục backup an toàn tại: {SAFE_DIR}")
 
 
 # =====================================================================
@@ -518,9 +520,9 @@ print(f"""
 
 ═══════════════════════════════════════════════════════════════════
 
-📋 CÁC BƯỚC ĐƯA VÀO DỰ ÁN:
+📋 CÁC BƯỚC ĐƯA VÀO DỰ ÁN AI_MONITORING_HUB:
    1. Mở Google Drive, vào thư mục: yolo11_safe_backup/
    2. Tải file '{PRODUCT_CODE}.onnx' về máy tính.
-   3. Copy file vào thư mục models của trạm/mã {PRODUCT_CODE}.
-   4. Khởi chạy giám sát!
+   3. Copy file vào thư mục: shared/models/yolo/{PRODUCT_CODE}.onnx
+   4. Khởi chạy giám sát trạm Máy 8!
 """)

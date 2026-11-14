@@ -105,30 +105,6 @@ class FrameProcessor:
         self._last_hands_update_time = 0.0
         self.thread = None
 
-        # Quản lý sản lượng hoàn thành chỉ trong ngày hôm nay (Daily Product Counter)
-        self.current_date = time.strftime('%Y-%m-%d')
-        self.today_products = 0
-        try:
-            db_summary = EventQueries.get_daily_summary(self.current_date, camera_id=self.cam_id)
-            self.today_products = int(db_summary.get("total_products", 0))
-            logger.info(f"FrameProcessor [{self.cam_id}]: Loaded today's ({self.current_date}) products = {self.today_products}")
-        except Exception as e:
-            logger.warning(f"FrameProcessor [{self.cam_id}]: Could not load daily products from DB: {e}")
-
-    def _sync_daily_products(self):
-        """Tự động kiểm tra sang ngày mới và đồng bộ sản lượng trong ngày."""
-        today = time.strftime('%Y-%m-%d')
-        if today != self.current_date:
-            logger.info(f"FrameProcessor [{self.cam_id}]: Date changed from {self.current_date} to {today}. Resetting daily counter.")
-            self.current_date = today
-            self.today_products = 0
-            if hasattr(self.engine, 'current_date'):
-                self.engine.current_date = today
-            if hasattr(self.engine, 'total_products'):
-                self.engine.total_products = 0
-            if hasattr(self.engine, 'turntable_counter'):
-                self.engine.turntable_counter.total_products = 0
-
     def start(self):
         if self.running: return
         self.running = True
@@ -171,9 +147,6 @@ class FrameProcessor:
             frame = self.stream.get_frame()
             if frame is None:
                 time.sleep(0.05); continue
-
-            # Đồng bộ bộ đếm sản phẩm chỉ trong ngày hôm nay (reset nếu bước sang 0h)
-            self._sync_daily_products()
 
             with self._monitoring_lock:
                 if not self.monitoring_enabled:
@@ -311,15 +284,10 @@ class FrameProcessor:
                         except Exception as e:
                             logger.error(f"FrameProcessor [{self.cam_id}]: Error logging downtime event: {e}")
 
-                    # Ghi nhận sản phẩm hoàn thành từ Robot / Mâm xoay
+                    # Ghi nhận sản phẩm hoàn thành từ Robot
                     if self.latest_status.get("new_product_event"):
                         product_ev = self.latest_status.get("new_product_event")
-                        added_cnt = int(product_ev.get("added_products", 1))
-                        self.today_products += added_cnt
                         self._handle_product_pickup(product_ev)
-
-                    # Luôn ép trường total_products theo đúng sản lượng trong ngày hôm nay
-                    self.latest_status["total_products"] = self.today_products
 
                     # 6. Socket Update — Giảm tần suất xuống 1 lần/giây (mỗi 15 frame) trừ khi hoàn thành hoặc đổi bước
                     is_completed = self.latest_status.get("sop_status") == "completed"
@@ -371,11 +339,6 @@ class FrameProcessor:
 
                     if is_completed or step_changed or has_product_event:
                         if is_completed and not self._completion_logged:
-                            # Với các trạm không đếm theo mâm xoay/new_product_event riêng biệt,
-                            # mỗi chu kỳ hoàn thành tính là hoàn thành sản phẩm trong ngày
-                            if not hasattr(self.engine, "turntable_counter") and not hasattr(self.engine, "update_turntable_motion"):
-                                self.today_products += 1
-                                self.latest_status["total_products"] = self.today_products
                             self._handle_completion()
                             self._completion_logged = True
                         emit_step_update(self.cam_id, self.latest_status, self.latest_status.get("hands_info", {}))
@@ -478,11 +441,7 @@ class FrameProcessor:
                 self.sop_config = sop_config
                 self.engine.reset()
                 self._completion_logged = False
-                self.latest_status = {
-                    "sop_status": "idle",
-                    "progress_percent": 0,
-                    "total_products": self.today_products
-                }
+                self.latest_status = {"sop_status": "idle", "progress_percent": 0}
             
             logger.info(f"FrameProcessor [{self.cam_id}]: Successfully switched to '{product_id}'.")
             return True
