@@ -3,12 +3,14 @@ FROM local-base:latest
 # Avoid prompts from apt
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Ho_Chi_Minh
 
 WORKDIR /app
 
-# Install Python and system dependencies for OpenCV, sound alert, video encoding
+# Install Python and system dependencies for OpenCV, sound alert, video encoding, timezone
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     python3 \
     python3-pip \
     python3-dev \
